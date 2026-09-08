@@ -7,8 +7,8 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { Kit, DynSet, buildGround, generateMap, districtAt, DISTRICTS, ROADS, ISLAND_R, PLAY_R, collideStatic, Grid, setGlow, MATS, treeUniforms, mulberry32, vnoise } from './world.js?v=14';
-import * as AUDIO from './audio.js?v=14';
+import { Kit, DynSet, buildGround, generateMap, districtAt, DISTRICTS, ROADS, ISLAND_R, PLAY_R, collideStatic, Grid, setGlow, MATS, treeUniforms, mulberry32, vnoise } from './world.js?v=15';
+import * as AUDIO from './audio.js?v=15';
 
 const $ = (s) => document.querySelector(s);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -332,7 +332,7 @@ const threat = () => Math.floor(minute()) + 1;
 const kit = new Kit();
 let world, ground, playerRig, wardenRig, enemySets = {}, pickupSets = {}, boltSet, spitSet;
 const loadBar = $('#loadBar'), loadText = $('#loadText');
-kit.load('./assets/kit.glb?v=2', (e) => { if (e.total) loadBar.style.transform = `scaleX(${(e.loaded / e.total) * 0.6})`; }).then(() => {
+kit.load('./assets/kit.glb?v=4', (e) => { if (e.total) loadBar.style.transform = `scaleX(${(e.loaded / e.total) * 0.6})`; }).then(() => {
   loadText.textContent = 'Planting the wildwood…';
   setTimeout(() => { const t0 = performance.now(); buildWorld(); console.log('world built in', Math.round(performance.now() - t0), 'ms'); }, 30);
 }).catch((err) => { loadText.textContent = 'Failed to load kit: ' + err.message; console.error(err); });
@@ -388,7 +388,7 @@ function makeRigAnimator(root, prefix) {
     if (!base) { c = clip.clone(); THREE.AnimationUtils.makeClipAdditive(c); }
     const a = mixer.clipAction(c);
     if (!base) a.blendMode = THREE.AdditiveAnimationBlendMode;
-    if (!base && key !== 'charge') { a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = false; }
+    if (!base && key !== 'charge') { a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = key === 'death'; }
     else { a.play(); a.setEffectiveWeight(key === 'idle' ? 1 : 0); }
     actions[key] = a;
   }
@@ -846,6 +846,9 @@ function startRun() {
   S.stats = { kills: 0, elites: 0, dmgDealt: 0 }; S.dmgLog = {};
   W.tod = 'day'; W.wx = 'clear'; W.auto = true; W.wxTimer = 60 + Math.random() * 30; applyWeatherInstant();
   S.bossKilled = false;
+  if (ANIM.p) { for (const k in ANIM.p.actions) if (!['idle', 'walk'].includes(k)) ANIM.p.actions[k].stop(); }
+  if (ANIM.w) { for (const k in ANIM.w.actions) if (!['idle', 'walk', 'charge'].includes(k)) ANIM.w.actions[k].stop(); }
+  S.bossCorpse = null;
   if (unlocked('tithe')) P.shards = 10;
   if (unlocked('boltstart')) { P.weapon = 1; P.weaponRank.bolt = 1; }
   refreshWeatherButtons(); refreshAutoBtn(); refreshWeaponCard();
@@ -870,6 +873,8 @@ function backToTitle() {
 function endRun(won) {
   S.phase = won ? 'won' : 'dead';
   S.paused = true; S.modal = 'end';
+  if (ANIM.p) playOnce(ANIM.p, won ? 'cheer' : 'death', 1);
+  playerRig.visible = true;
   saveBest();
   const fresh = S.endless && S.recorded ? [] : recordRun(won);
   S.recorded = true;
@@ -906,7 +911,7 @@ function tryDash() {
 }
 function tryNova() {
   if (P.novaCd > 0) return;
-  P.novaCd = 12 * P.novaCdMult;
+  P.novaCd = 12 * P.novaCdMult; P.animOnce = 'nova';
   const R = 6.5 * P.areaMult;
   const dmg = 45 * dmgMult();
   let hitCount = 0;
@@ -928,7 +933,7 @@ function tryNova() {
 function tryHeavy() {
   if (P.heavyCd > 0 || P.dashT > 0) return;
   P.heavyCd = 2.4 / P.speedTalent;
-  P.swing = 0.35;
+  P.swing = 0.35; P.animOnce = 'heavy';
   const R = 3.8 * P.areaMult;
   const dmg = 34 * dmgMult() * P.heavyMult;
   let hitCount = 0;
@@ -1086,7 +1091,7 @@ function hurtPlayer(raw, src = 'other') {
   if (P.invuln > 0 || P.dashT > 0 || S.phase !== 'run') return;
   const dmg = Math.max(1, Math.round(raw * (1 - armour())));
   S.dmgLog[src] = (S.dmgLog[src] || 0) + dmg;
-  P.hp -= dmg; P.invuln = 0.6; P.hitFlash = 0.2;
+  P.hp -= dmg; P.invuln = 0.6; P.hitFlash = 0.2; if (!P.animOnce) P.animOnce = 'hurt';
   showNumber(P.x, 1.6, P.z, '-' + dmg, 'player');
   $('#hurt').style.opacity = '1'; setTimeout(() => { $('#hurt').style.opacity = '0'; }, 120);
   camShake.amp = Math.max(camShake.amp, 0.3); camShake.t = 0.25;
@@ -1132,7 +1137,7 @@ function openLevelUp() {
 function pickTalent(i) {
   const t = luOptions[i]; if (!t) return;
   P.talents[t.key] = (P.talents[t.key] || 0) + 1;
-  t.apply(P);
+  t.apply(P); P.animOnce = 'cheer';
   $('#levelup').classList.remove('show'); S.modal = null; S.paused = false;
   AUDIO.sfx('ui');
   burstParticles(P.x, 0.8, P.z, 30, [0.55, 0.95, 0.85], 4, 0.4, 0.6, -2);
@@ -1339,7 +1344,8 @@ function updateBurns(dt) {
 // boss: the Ash Warden
 // =====================================================================
 function spawnBoss() {
-  S.bossSpawned = true;
+  S.bossSpawned = true; S.bossCorpse = null;
+  if (ANIM.w) ANIM.w.actions.death.stop();
   const a = Math.random() * Math.PI * 2;
   let x = P.x + Math.cos(a) * 22, z = P.z + Math.sin(a) * 22;
   const r = Math.hypot(x, z); if (r > PLAY_R - 4) { x *= (PLAY_R - 4) / r; z *= (PLAY_R - 4) / r; }
@@ -1359,10 +1365,12 @@ function spawnBoss() {
 function hurtBoss(dmg, crit = false) {
   const b = S.boss; if (!b || b.dead) return;
   b.hp -= dmg; b.flash = 1; S.stats.dmgDealt += dmg;
+  if (dmg >= 60 && !b.animOnce && S.t - (b.hurtAt || -9) > 1.6 && b.phase !== 'intro') { b.animOnce = 'hurt'; b.hurtAt = S.t; }
   showNumber(b.x, 3.6, b.z, String(Math.round(dmg)), crit ? 'crit' : '');
   burstParticles(b.x, 1.6, b.z, 5, [1, 0.5, 0.2], 3, 0.35, 0.4);
   if (b.hp <= 0) {
-    b.dead = true; wardenRig.visible = false; S.boss = null; S.stats.elites++; S.stats.kills++; S.bossKilled = true;
+    b.dead = true; S.boss = null; S.stats.elites++; S.stats.kills++; S.bossKilled = true;
+    S.bossCorpse = { t: 3.2 }; if (ANIM.w) { setBase(ANIM.w, 0); ANIM.w.actions.charge.setEffectiveWeight(0); playOnce(ANIM.w, 'death', 1); }
     $('#boss').classList.remove('show');
     burstParticles(b.x, 1.5, b.z, 260, [1, 0.5, 0.15], 10, 0.7, 1.5);
     burstParticles(b.x, 1.5, b.z, 120, [0.3, 0.25, 0.35], 7, 0.6, 1.2);
@@ -1377,6 +1385,7 @@ function hurtBoss(dmg, crit = false) {
   }
 }
 function updateBoss(dt) {
+  if (S.bossCorpse) { S.bossCorpse.t -= S.dtRaw; ANIM.w.mixer.update(S.dtRaw); if (S.bossCorpse.t <= 0) { S.bossCorpse = null; wardenRig.visible = false; } }
   const b = S.boss; if (!b) return;
   b.flash = Math.max(0, b.flash - dt * 6); b.bob += dt;
   const dx = P.x - b.x, dz = P.z - b.z, d = Math.hypot(dx, dz) || 0.001, nx = dx / d, nz = dz / d;
@@ -1438,7 +1447,7 @@ function updateBoss(dt) {
   // summon at 60% / 30%
   const frac = b.hp / b.maxHp;
   if (!b.phase2 && frac < 0.3 && b.phase !== 'intro') {
-    b.phase2 = true; b.r = 1.6;
+    b.phase2 = true; b.r = 1.6; b.animOnce = 'rage';
     $('#boss .name').textContent = tr('THE ASH WARDEN · BURNING');
     showBanner('THE WARDEN BURNS BRIGHTER', 4); AUDIO.sfx('roar');
     burstParticles(b.x, 1.5, b.z, 120, [1, 0.5, 0.15], 8, 0.6, 1.2); spawnRing(b.x, b.z, 9, 0xffb060, 0.8, 0.06);
@@ -1446,7 +1455,7 @@ function updateBoss(dt) {
   }
   for (let i = 0; i < 2; i++) {
     const th = i === 0 ? 0.6 : 0.3;
-    if (frac < th && !b.summoned[i]) { b.summoned[i] = true; for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2; spawnEnemy(k % 2 ? 'wisp' : 'cinder', b.x + Math.cos(a) * 3, b.z + Math.sin(a) * 3); } showBanner('THE WARDEN CALLS ITS KIN', 3); AUDIO.sfx('roar'); }
+    if (frac < th && !b.summoned[i]) { b.summoned[i] = true; for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2; spawnEnemy(k % 2 ? 'wisp' : 'cinder', b.x + Math.cos(a) * 3, b.z + Math.sin(a) * 3); } showBanner('THE WARDEN CALLS ITS KIN', 3); AUDIO.sfx('roar'); b.animOnce = 'summon'; }
   }
   collideStatic(b, world.obstacles, 1.0);
   // rig pose
@@ -1462,6 +1471,7 @@ function updateBoss(dt) {
   setBase(A, ph === 'chase' ? 1 : 0, 1.1 * (b.phase2 ? 1.3 : 1));
   const chargeW = (ph === 'charge' || ph === 'chargeTele') ? 1 : 0;
   A.actions.charge.setEffectiveWeight(lerp(A.actions.charge.getEffectiveWeight(), chargeW, 1 - Math.pow(0.001, dt * 5)));
+  if (b.animOnce) { playOnce(A, b.animOnce, b.animOnce === 'hurt' ? 1.3 : 1); b.animOnce = null; }
   if (ph !== b.animPhase) {
     b.animPhase = ph;
     if (ph === 'intro') playOnce(A, 'roar', 1.67 / 1.7);
@@ -1512,9 +1522,14 @@ function updatePlayer(dt) {
   void body; void armL; void armR; void head;
   const A = ANIM.p;
   setBase(A, clamp(P.moving, 0, 1), (0.9 + 0.35 * P.speedMult) * (P.dashT > 0 ? 2.2 : 1));
-  if (P.swing > (P.swingPrev || 0) + 0.02) { const rate = WEAPONS[P.weapon].rate / P.speedTalent; playOnce(A, 'attack', 0.583 / Math.max(0.3, Math.min(0.7, rate))); }
+  const ONCE_SPEED = { heavy: 1.15, nova: 1.0, hurt: 1.25, cheer: 1.0, look: 1.0 };
+  if (P.animOnce) { playOnce(A, P.animOnce, ONCE_SPEED[P.animOnce] || 1); P.animOnce = null; }
+  else if (P.swing > (P.swingPrev || 0) + 0.02) { const rate = WEAPONS[P.weapon].rate / P.speedTalent; playOnce(A, 'attack', 0.583 / Math.max(0.3, Math.min(0.7, rate))); }
   if (P.dashT > (P.dashPrev || 0) + 0.05) playOnce(A, 'dash', 0.5 / 0.3);
   P.swingPrev = P.swing; P.dashPrev = P.dashT;
+  // idle curiosity: glance at the lantern now and then
+  if (P.moving < 0.05 && S.enemies.length < 6) { P.lookT = (P.lookT == null ? 4 : P.lookT) - dt; if (P.lookT <= 0) { P.lookT = 7 + Math.random() * 7; if (!A.actions.attack.isRunning()) playOnce(A, 'look', 1); } }
+  else P.lookT = Math.max(P.lookT || 0, 2.5);
   A.mixer.update(dt);
   lan.rotation.x = Math.sin(P.bob * 0.7) * 0.25 * (0.3 + P.moving);
   playerRig.traverse((o) => { if (o.isMesh && o.material.emissive) o.material.emissive.setRGB(P.hitFlash * 3, P.hitFlash * 1.2, P.hitFlash * 1.2); });
@@ -1674,6 +1689,8 @@ function tick(dt) {
     updateBurns(dt);
     if (!S.endless && S.t >= RUN_LENGTH && S.phase === 'run') endRun(true);
     AUDIO.setTension(S.boss ? 1 : (P.hp / P.maxHp < 0.35 ? 0.7 : (threat() >= 5 ? 0.5 : 0)));
+  } else if (S.phase === 'dead' && ANIM.p) {
+    ANIM.p.mixer.update(dt);
   } else if (S.phase === 'title') {
     // slow camera drift around the village on the title screen
     P.x = Math.sin(S.wall * 0.08) * 6; P.z = 4 + Math.cos(S.wall * 0.08) * 4;

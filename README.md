@@ -49,7 +49,11 @@ BOSS 血量 `2600 + 180·分钟`。调前的版本 AI 在 3 分钟被 130 只围
 
 - `build_kit.py` 末尾给主角/BOSS 的骨架 Empty(P_Body/P_Head/P_ArmL/P_ArmR、W_Body/W_Head/W_ArmL/W_ArmR)打关键帧:
   `clip(name, rig, frames, keys, loop)` 每个物体一条独立 Action(Blender 5 的 slotted action 没有 `fcurves`,别去调插值),推进同名 NLA 轨道,
-  导出用 `export_animation_mode="NLA_TRACKS"` —— 同名轨道跨物体合并成一个 glTF 动画。9 条:P_idle/walk/attack/dash、W_idle/walk/slam/charge/roar
+  导出用 `export_animation_mode="NLA_TRACKS"` —— 同名轨道跨物体合并成一个 glTF 动画。19 条:
+  主角 idle/walk/attack/dash/hurt(受击后仰)/death(趴倒并保持)/cheer(升级、胜利举刀)/heavy(过顶横扫)/nova(张臂蓄力)/look(待机看提灯,7–14 s 随机);
+  守卫 idle/walk/slam/charge/roar/hurt(≥60 伤害且 1.6 s 内不重复)/summon(单臂召唤)/rage(二阶段狂暴)/death(倒地,尸体留 3.2 s 再隐藏)
+- 触发用 `P.animOnce` / `b.animOnce` 排队,一帧只起一个叠加剪辑;死亡阶段 `tick` 仍推主角 mixer 让倒地播完;新局开始把所有一次性剪辑 stop
+- 倒地位移要抬高不是压低:旋转绕脚底原点,身体躺平后中心在地面,得加 +0.22(主角)/ +0.55(守卫)才不埋进地里
 - 所有剪辑第 0 帧 = 静止姿势,网页端 `makeRigAnimator`:idle/walk 是基础层(权重随移动量交叉淡入),
   其余用 `AnimationUtils.makeClipAdditive` 转成叠加层一次性播放(攻击按攻速缩放时长,砸地按 0.9 s 预警对齐落臂时刻,BOSS 登场慢镜用未缩放的 dt 播咆哮)
 - 提灯摆动仍是程序化;`kit.glb` 的 URL 加了 `?v=2`,否则浏览器会用没有动画的旧缓存
