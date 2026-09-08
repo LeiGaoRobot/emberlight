@@ -7,8 +7,8 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { Kit, DynSet, buildGround, generateMap, districtAt, DISTRICTS, ROADS, ISLAND_R, PLAY_R, collideStatic, Grid, setGlow, MATS, treeUniforms, mulberry32, vnoise } from './world.js?v=13';
-import * as AUDIO from './audio.js?v=13';
+import { Kit, DynSet, buildGround, generateMap, districtAt, DISTRICTS, ROADS, ISLAND_R, PLAY_R, collideStatic, Grid, setGlow, MATS, treeUniforms, mulberry32, vnoise } from './world.js?v=14';
+import * as AUDIO from './audio.js?v=14';
 
 const $ = (s) => document.querySelector(s);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -332,7 +332,7 @@ const threat = () => Math.floor(minute()) + 1;
 const kit = new Kit();
 let world, ground, playerRig, wardenRig, enemySets = {}, pickupSets = {}, boltSet, spitSet;
 const loadBar = $('#loadBar'), loadText = $('#loadText');
-kit.load('./assets/kit.glb', (e) => { if (e.total) loadBar.style.transform = `scaleX(${(e.loaded / e.total) * 0.6})`; }).then(() => {
+kit.load('./assets/kit.glb?v=2', (e) => { if (e.total) loadBar.style.transform = `scaleX(${(e.loaded / e.total) * 0.6})`; }).then(() => {
   loadText.textContent = 'Planting the wildwood…';
   setTimeout(() => { const t0 = performance.now(); buildWorld(); console.log('world built in', Math.round(performance.now() - t0), 'ms'); }, 30);
 }).catch((err) => { loadText.textContent = 'Failed to load kit: ' + err.message; console.error(err); });
@@ -351,6 +351,8 @@ function buildWorld() {
   wardenRig.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.material = rigMaterial(o.material); } });
   wardenRig.visible = false;
   scene.add(wardenRig);
+  ANIM.p = makeRigAnimator(playerRig, 'P_');
+  ANIM.w = makeRigAnimator(wardenRig, 'W_');
   // dynamic sets
   for (const k of Object.keys(ETYPES)) enemySets[k] = new DynSet(kit, ETYPES[k].kit, k === 'brute' ? 40 : 320, scene, { glowKey: 'EnemyGlow', outline: 1.07 });
   pickupSets.ember = new DynSet(kit, 'Ember', 600, scene, { cast: false, glowKey: 'Crystal' });
@@ -372,6 +374,33 @@ function buildWorld() {
   setupTouch();
   applyWeatherInstant();
   requestAnimationFrame(loop);
+}
+// Blender-authored clips: idle/walk are the base layer (weights cross-fade), the rest are additive one-shots
+const ANIM = {};
+function makeRigAnimator(root, prefix) {
+  const mixer = new THREE.AnimationMixer(root);
+  const actions = {};
+  for (const clip of kit.clips) {
+    if (!clip.name.startsWith(prefix)) continue;
+    const key = clip.name.slice(prefix.length);
+    const base = key === 'idle' || key === 'walk';
+    let c = clip;
+    if (!base) { c = clip.clone(); THREE.AnimationUtils.makeClipAdditive(c); }
+    const a = mixer.clipAction(c);
+    if (!base) a.blendMode = THREE.AdditiveAnimationBlendMode;
+    if (!base && key !== 'charge') { a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = false; }
+    else { a.play(); a.setEffectiveWeight(key === 'idle' ? 1 : 0); }
+    actions[key] = a;
+  }
+  return { mixer, actions, root, base: 0 };
+}
+function playOnce(anim, key, timeScale = 1) {
+  const a = anim.actions[key]; if (!a) return;
+  a.reset(); a.setEffectiveWeight(1); a.setEffectiveTimeScale(timeScale); a.play();
+}
+function setBase(anim, walkW, walkSpeed = 1) {
+  anim.actions.walk.setEffectiveWeight(walkW); anim.actions.idle.setEffectiveWeight(1 - walkW);
+  anim.actions.walk.setEffectiveTimeScale(walkSpeed);
 }
 function rigMaterial(m) {
   const name = m.name || '';
@@ -1427,16 +1456,19 @@ function updateBoss(dt) {
   const s = 1.15 * (b.phase2 ? 1.15 : 1);
   wardenRig.scale.setScalar(s);
   if (b.phase2 && Math.random() < 0.5) spawnParticle(b.x + (Math.random() - 0.5) * 1.5, 1 + Math.random() * 2, b.z + (Math.random() - 0.5) * 1.5, 0, 1.5, 0, 1, 0.5, 0.15, 0.4, 0.6, 0.5);
-  body.position.y = Math.sin(b.bob * 2.5) * 0.06;
-  if (b.phase === 'intro') { const k = 1 - b.pt / 1.7; armR.rotation.x = -2.6 * Math.sin(k * Math.PI); armL.rotation.x = -2.6 * Math.sin(k * Math.PI); body.position.y = Math.sin(k * Math.PI) * 0.6; }
-  else if (b.phase === 'slamTele') { armR.rotation.x = -2.4 * (1 - b.pt / 0.9); armL.rotation.x = -2.2 * (1 - b.pt / 0.9); }
-  else if (b.phase === 'recover') { armR.rotation.x = 0.9; armL.rotation.x = 0.7; }
-  else if (b.phase === 'charge') { armR.rotation.x = 1.2; armL.rotation.x = 1.2; body.rotation.x = 0.25; }
-  else { armR.rotation.x = Math.sin(b.bob * 2.5) * 0.15; armL.rotation.x = -Math.sin(b.bob * 2.5) * 0.15; body.rotation.x = 0; }
-  head.rotation.y = Math.sin(b.bob * 0.8) * 0.2;
-  const fl = 1 + b.flash * 2;
+  void body; void armR; void armL; void head;
+  const A = ANIM.w;
+  const ph = b.phase;
+  setBase(A, ph === 'chase' ? 1 : 0, 1.1 * (b.phase2 ? 1.3 : 1));
+  const chargeW = (ph === 'charge' || ph === 'chargeTele') ? 1 : 0;
+  A.actions.charge.setEffectiveWeight(lerp(A.actions.charge.getEffectiveWeight(), chargeW, 1 - Math.pow(0.001, dt * 5)));
+  if (ph !== b.animPhase) {
+    b.animPhase = ph;
+    if (ph === 'intro') playOnce(A, 'roar', 1.67 / 1.7);
+    else if (ph === 'slamTele') playOnce(A, 'slam', 0.79 / 0.9);   // arms come down exactly when the telegraph ends
+  }
+  A.mixer.update(S.bossIntro > 0 ? S.dtRaw : dt);
   wardenRig.traverse((o) => { if (o.isMesh && o.material.emissive) o.material.emissive.setRGB(b.flash * 0.9, b.flash * 0.5, b.flash * 0.3); });
-  void fl;
   $('#bossbar > i').style.transform = `scaleX(${clamp(b.hp / b.maxHp, 0, 1)})`;
 }
 
@@ -1477,14 +1509,13 @@ function updatePlayer(dt) {
   playerRig.rotation.y = P.facing;
   P.bob += dt * (8 + P.moving * 6);
   const body = playerRig.getObjectByName('P_Body'), armL = playerRig.getObjectByName('P_ArmL'), armR = playerRig.getObjectByName('P_ArmR'), head = playerRig.getObjectByName('P_Head'), lan = playerRig.getObjectByName('P_Lantern');
-  body.position.y = Math.abs(Math.sin(P.bob)) * 0.08 * P.moving;
-  body.rotation.x = 0.12 * P.moving + (P.dashT > 0 ? 0.5 : 0);
-  body.rotation.z = Math.sin(P.bob) * 0.05 * P.moving;
-  armL.rotation.x = Math.sin(P.bob) * 0.5 * P.moving - 0.3;
-  const sw = P.swing > 0 ? Math.sin((0.22 - Math.min(0.22, P.swing)) / 0.22 * Math.PI) : 0;
-  armR.rotation.x = -0.2 - sw * 1.8 + Math.sin(P.bob + Math.PI) * 0.4 * P.moving * (1 - sw);
-  armR.rotation.y = -sw * 1.2;
-  head.rotation.y = Math.sin(P.bob * 0.5) * 0.08;
+  void body; void armL; void armR; void head;
+  const A = ANIM.p;
+  setBase(A, clamp(P.moving, 0, 1), (0.9 + 0.35 * P.speedMult) * (P.dashT > 0 ? 2.2 : 1));
+  if (P.swing > (P.swingPrev || 0) + 0.02) { const rate = WEAPONS[P.weapon].rate / P.speedTalent; playOnce(A, 'attack', 0.583 / Math.max(0.3, Math.min(0.7, rate))); }
+  if (P.dashT > (P.dashPrev || 0) + 0.05) playOnce(A, 'dash', 0.5 / 0.3);
+  P.swingPrev = P.swing; P.dashPrev = P.dashT;
+  A.mixer.update(dt);
   lan.rotation.x = Math.sin(P.bob * 0.7) * 0.25 * (0.3 + P.moving);
   playerRig.traverse((o) => { if (o.isMesh && o.material.emissive) o.material.emissive.setRGB(P.hitFlash * 3, P.hitFlash * 1.2, P.hitFlash * 1.2); });
   playerRig.visible = !(P.invuln > 0 && Math.floor(S.wall * 20) % 2 === 0 && P.dashT <= 0);
@@ -1625,7 +1656,7 @@ function loop(now) {
   tick(dt);
 }
 function tick(dt) {
-  S.wall += dt;
+  S.wall += dt; S.dtRaw = dt;
   if (S.hitStop > 0) { S.hitStop -= dt; dt *= 0.08; }
   if (S.bossIntro > 0) { S.bossIntro -= dt; dt *= 0.2; }
   if (S.slowMo > 0) { S.slowMo -= dt; dt *= 0.35; }
@@ -1647,6 +1678,7 @@ function tick(dt) {
     // slow camera drift around the village on the title screen
     P.x = Math.sin(S.wall * 0.08) * 6; P.z = 4 + Math.cos(S.wall * 0.08) * 4;
     playerRig.position.set(-2.5, 0, 4.5); playerRig.rotation.y = 0.6; FX.playerRing.position.set(-2.5, 0.03, 4.5);
+    if (ANIM.p) { setBase(ANIM.p, 0); ANIM.p.mixer.update(dt); }
     lampLight.position.set(-2.5, 1, 5);
     $('#forgeHint').classList.remove('show');
   }
@@ -1747,7 +1779,7 @@ function autopilot(dt) {
 // =====================================================================
 window.__emberlight = {
   S, P: () => P, W, world: () => world, startRun, endRun, spawnBoss, spawnEnemy, spawnAround, setWeather: (tod, wx) => { W.tod = tod; W.wx = wx; W.auto = false; refreshWeatherButtons(); },
-  cheat: (o) => Object.assign(P, o), META, recordRun, SET, applyLang, applyQuality, gainXp, AUDIO, camDist: (v) => { camDist = v; }, post: () => ({ ao: gtaoPass && gtaoPass.enabled, bloom: bloomPass && bloomPass.enabled, passes: composer && composer.passes.length }),
+  cheat: (o) => Object.assign(P, o), META, recordRun, SET, applyLang, applyQuality, gainXp, AUDIO, camDist: (v) => { camDist = v; }, ANIM, clips: () => kit.clips.map((c) => c.name + ':' + c.duration.toFixed(2)), post: () => ({ ao: gtaoPass && gtaoPass.enabled, bloom: bloomPass && bloomPass.enabled, passes: composer && composer.passes.length }),
   project: (x, y, z) => { const v = new THREE.Vector3(x, y, z).project(camera); return { sx: (v.x * 0.5 + 0.5) * window.innerWidth, sy: (-v.y * 0.5 + 0.5) * window.innerHeight }; },
   slashes: () => S.slashes.map((m) => ({ ry: m.rotation.y, arc: m.userData.arc })), giveShards: (n) => { P.shards += n; }, teleport: (x, z) => { P.x = x; P.z = z; },
   capture: async (url) => {

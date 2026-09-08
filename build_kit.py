@@ -719,6 +719,111 @@ cyl("WHilt", (0, 0, 0), 0.05, 0.7, M["WardenTrim"], wbl, verts=6, rot=(math.pi /
 arc("EmberCore_WCrescent", (0, -0.8, 0), 0.7, 1.15, math.radians(195), math.radians(345), 0.06, M["EmberCore"], wbl)
 arc("WCrescentEdge", (0, -0.8, 0), 0.62, 0.72, math.radians(200), math.radians(340), 0.05, M["Bone"], wbl)
 
+# ---------------------------------------------------------------- animations (keyframes on the rig empties, one NLA track per clip)
+# Every clip starts from the rest pose at frame 0 so the web side can play the one-shots additively.
+scene.render.fps = 24
+RIG_P = {"body": body, "head": head, "armL": arm_l, "armR": arm_r}
+RIG_W = {"body": wb, "head": wh, "armL": wl, "armR": wr}
+
+def _rest(objs):
+    for o in objs.values():
+        o.rotation_euler = (0, 0, 0)
+        o.location = (o.get("rest_x", o.location.x), o.get("rest_y", o.location.y), o.get("rest_z", o.location.z))
+
+def clip(name, objs, frames, keys, loop=True):
+    """keys: {objkey: {frame: {"rot": (x,y,z), "loc": (dx,dy,dz)}}} — loc is an offset from the rest location."""
+    for o in objs.values():
+        for k in ("rest_x", "rest_y", "rest_z"):
+            if k not in o:
+                o["rest_x"], o["rest_y"], o["rest_z"] = o.location.x, o.location.y, o.location.z
+    for key, o in objs.items():
+        if o.animation_data is None:
+            o.animation_data_create()
+        act = bpy.data.actions.new(f"{name}__{key}")
+        o.animation_data.action = act
+        kf = keys.get(key, {})
+        frame_list = sorted(set([0, frames] + list(kf.keys())))
+        for f in frame_list:
+            rest = {"rot": (0, 0, 0), "loc": (0, 0, 0)}
+            if f in kf:
+                v = kf[f]
+            elif f == 0 or not kf:
+                v = rest
+            else:
+                # last frame: loops return to the frame-0 pose, one-shots hold the last authored pose
+                v = kf.get(0, rest) if loop else kf[max(kf.keys())]
+            rot = v.get("rot", (0, 0, 0)); loc = v.get("loc", (0, 0, 0))
+            o.rotation_euler = rot
+            o.location = (o["rest_x"] + loc[0], o["rest_y"] + loc[1], o["rest_z"] + loc[2])
+            o.keyframe_insert(data_path="rotation_euler", frame=f)
+            o.keyframe_insert(data_path="location", frame=f)
+        o.animation_data.action = None
+        track = o.animation_data.nla_tracks.new()
+        track.name = name
+        strip = track.strips.new(name, 0, act)
+        strip.name = name
+    _rest(objs)
+
+R = lambda x=0, y=0, z=0: {"rot": (x, y, z)}
+RL = lambda rot=(0, 0, 0), loc=(0, 0, 0): {"rot": rot, "loc": loc}
+
+# ---- player
+clip("P_idle", RIG_P, 48, {
+    "body": {0: RL(), 24: RL((0.02, 0, 0), (0, 0, 0.02))},
+    "head": {0: R(), 16: R(0, 0.12, 0), 36: R(0, -0.1, 0)},
+    "armL": {0: R(-0.25), 24: R(-0.15)},
+    "armR": {0: R(-0.2), 24: R(-0.3)},
+})
+clip("P_walk", RIG_P, 24, {
+    "body": {0: RL((0.12, 0, 0.04), (0, 0, 0.0)), 6: RL((0.12, 0, 0), (0, 0, 0.07)), 12: RL((0.12, 0, -0.04), (0, 0, 0.0)), 18: RL((0.12, 0, 0), (0, 0, 0.07))},
+    "head": {0: R(0.05, 0, 0), 12: R(-0.03, 0, 0)},
+    "armL": {0: R(0.55), 12: R(-0.55)},
+    "armR": {0: R(-0.55), 12: R(0.55)},
+})
+clip("P_attack", RIG_P, 14, {
+    "armR": {0: R(), 3: R(0.7, 0.35, 0), 6: R(-2.1, -1.25, 0.2), 9: R(-1.6, -1.0, 0.1), 14: R()},
+    "body": {0: R(), 3: R(0.0, -0.25, 0.05), 6: R(0.18, 0.35, -0.12), 14: R()},
+    "armL": {0: R(), 6: R(0.5, 0, 0), 14: R()},
+}, loop=False)
+clip("P_dash", RIG_P, 12, {
+    "body": {0: R(), 3: R(0.55, 0, 0), 9: R(0.5, 0, 0), 12: R()},
+    "armL": {0: R(), 3: R(0.9, 0, 0), 12: R()},
+    "armR": {0: R(), 3: R(0.9, 0, 0), 12: R()},
+}, loop=False)
+
+# ---- warden
+clip("W_idle", RIG_W, 72, {
+    "body": {0: RL(), 36: RL((0.03, 0, 0), (0, 0, 0.08))},
+    "head": {0: R(), 24: R(0.05, 0.2, 0), 52: R(-0.05, -0.18, 0)},
+    "armL": {0: R(-0.15), 36: R(-0.35, 0, 0.1)},
+    "armR": {0: R(-0.15), 36: R(-0.3, 0, -0.1)},
+})
+clip("W_walk", RIG_W, 36, {
+    "body": {0: RL((0.15, 0, 0.06), (0, 0, 0)), 9: RL((0.15, 0, 0), (0, 0, 0.16)), 18: RL((0.15, 0, -0.06), (0, 0, 0)), 27: RL((0.15, 0, 0), (0, 0, 0.16))},
+    "head": {0: R(0.06), 18: R(-0.04)},
+    "armL": {0: R(0.5), 18: R(-0.5)},
+    "armR": {0: R(-0.5), 18: R(0.5)},
+})
+clip("W_slam", RIG_W, 24, {
+    "armL": {0: R(), 12: R(-2.6, 0, 0.3), 16: R(-2.6, 0, 0.3), 19: R(0.9, 0, 0.1), 24: R(0.6, 0, 0)},
+    "armR": {0: R(), 12: R(-2.6, 0, -0.3), 16: R(-2.6, 0, -0.3), 19: R(0.9, 0, -0.1), 24: R(0.6, 0, 0)},
+    "body": {0: RL(), 12: RL((-0.15, 0, 0), (0, 0, 0.35)), 16: RL((-0.15, 0, 0), (0, 0, 0.35)), 19: RL((0.35, 0, 0), (0, 0, -0.45)), 24: RL((0.25, 0, 0), (0, 0, -0.3))},
+    "head": {0: R(), 12: R(-0.4), 19: R(0.5), 24: R(0.4)},
+}, loop=False)
+clip("W_charge", RIG_W, 12, {
+    "body": {0: RL((0.3, 0, 0), (0, 0, -0.1)), 6: RL((0.3, 0, 0), (0, 0, 0.0))},
+    "armL": {0: R(1.3, 0, 0.2), 6: R(1.1, 0, 0.2)},
+    "armR": {0: R(1.3, 0, -0.2), 6: R(1.1, 0, -0.2)},
+    "head": {0: R(0.2), 6: R(0.25)},
+})
+clip("W_roar", RIG_W, 40, {
+    "body": {0: RL(), 10: RL((-0.2, 0, 0), (0, 0, 0.7)), 26: RL((-0.25, 0, 0), (0, 0, 0.75)), 40: RL()},
+    "armL": {0: R(), 10: R(-2.8, 0, 0.8), 26: R(-2.9, 0, 0.9), 40: R()},
+    "armR": {0: R(), 10: R(-2.8, 0, -0.8), 26: R(-2.9, 0, -0.9), 40: R()},
+    "head": {0: R(), 10: R(-0.55), 26: R(-0.6), 40: R()},
+}, loop=False)
+scene.frame_set(0)
+
 # ---------------------------------------------------------------- preview render (kit lineup)
 cam_data = bpy.data.cameras.new("Cam")
 cam_data.type = "ORTHO"
@@ -762,7 +867,8 @@ for o in bpy.data.objects:
         o.select_set(True)
 glb = os.path.join(OUT, "site", "assets", "kit.glb")
 bpy.ops.export_scene.gltf(filepath=glb, export_format="GLB", use_selection=True, export_apply=True, export_yup=True,
-                          export_materials="EXPORT", export_animations=False, export_lights=False, export_cameras=False)
+                          export_materials="EXPORT", export_animations=True, export_animation_mode="NLA_TRACKS",
+                          export_force_sampling=True, export_lights=False, export_cameras=False)
 meshes = sum(1 for o in bpy.data.objects if o.type == "MESH")
 tris = sum(len(o.data.polygons) for o in bpy.data.objects if o.type == "MESH")
 print(f"exported {glb}: {len(KIT)} kit items, {meshes} meshes, ~{tris} polys, {os.path.getsize(glb)/1e6:.2f} MB")

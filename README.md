@@ -45,6 +45,15 @@ BOSS 血量 `2600 + 180·分钟`。调前的版本 AI 在 3 分钟被 130 只围
 - **性能**:静态实例只上传镜头焦点 58+0.6·camDist 单位内的(移动 6 单位重建一次,8.7k 实例扫描 <1 ms),村庄三角面 759k → 434k,draw call 不变;阴影相机随缩放收紧,贴图 4096/2048/1024 三档
 - 修了两个真 bug:**A/D 左右反了、挥砍刀光偏了约 130°**(右向量符号、扇形旋转符号,已用屏幕投影数值验证:D → 屏幕 (+128, 0),W → (2, −109),鼠标在右侧时朝向/刀光/弹道投影均为 (+109, ~0));暂停时恰好升级会让天赋弹窗盖住暂停弹窗,"继续"失效 —— 现在有弹窗时升级会排队到弹窗关闭后
 
+## Blender 动画(2026-09-08)
+
+- `build_kit.py` 末尾给主角/BOSS 的骨架 Empty(P_Body/P_Head/P_ArmL/P_ArmR、W_Body/W_Head/W_ArmL/W_ArmR)打关键帧:
+  `clip(name, rig, frames, keys, loop)` 每个物体一条独立 Action(Blender 5 的 slotted action 没有 `fcurves`,别去调插值),推进同名 NLA 轨道,
+  导出用 `export_animation_mode="NLA_TRACKS"` —— 同名轨道跨物体合并成一个 glTF 动画。9 条:P_idle/walk/attack/dash、W_idle/walk/slam/charge/roar
+- 所有剪辑第 0 帧 = 静止姿势,网页端 `makeRigAnimator`:idle/walk 是基础层(权重随移动量交叉淡入),
+  其余用 `AnimationUtils.makeClipAdditive` 转成叠加层一次性播放(攻击按攻速缩放时长,砸地按 0.9 s 预警对齐落臂时刻,BOSS 登场慢镜用未缩放的 dt 播咆哮)
+- 提灯摆动仍是程序化;`kit.glb` 的 URL 加了 `?v=2`,否则浏览器会用没有动画的旧缓存
+
 ## 画面打磨(2026-09-08 第二轮,用户反馈"太糙")
 
 - **后期链** `EffectComposer`:RenderPass → `GTAOPass`(环境光遮蔽,高画质才开;帧率低于 42 先关它再降分辨率)→ `UnrealBloomPass`(0.42/0.55/阈值 0.95,只让窗灯/路灯/余烬发光)→ 自写调色 pass(轻对比、暖偏、暗角、极淡颗粒,夜晚暗角更重)→ `OutputPass`(ACES + sRGB)。渲染目标 HalfFloat + `samples: 4` 保住 MSAA

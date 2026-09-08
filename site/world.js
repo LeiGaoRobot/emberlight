@@ -160,6 +160,7 @@ export class Kit {
     } else gltf = await loader.loadAsync(url, onProgress);
     const root = gltf.scene;
     root.updateMatrixWorld(true);
+    this.clips = gltf.animations || [];
     for (const node of root.children) {
       if (!node.name.startsWith('Kit_')) continue;
       const name = node.name.slice(4);
