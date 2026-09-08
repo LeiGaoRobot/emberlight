@@ -16,6 +16,9 @@ D:/AI/tools/Blender/blender.exe -b -P build_kit.py -- --out D:/AI/emberlight   #
 
 ## 发布版
 
+- **在线玩(GitHub Pages)**:https://leigaorobot.github.io/emberlight/ (源:`docs/index.html`,与 `dist/index.html` 同步;改代码后 `python build_dist.py && cp dist/index.html docs/index.html` 再 push)
+- 仓库:https://github.com/LeiGaoRobot/emberlight
+
 - `python build_dist.py` → `dist/index.html`(单文件,import map + 内联三个模块 + kit.glb 转 base64,2.5 MB,任意静态托管可用)
   和 `dist/artifact.html`(claude.ai Artifact 用的 body-only 版,three/addons 走 jsDelivr `+esm` 打包避免 import map)。
   单文件版 GLB 不走 fetch,直接 atob 解码后 `GLTFLoader.parseAsync`,所以在禁 fetch 的沙箱里也能加载
