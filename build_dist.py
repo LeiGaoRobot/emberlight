@@ -8,7 +8,7 @@ Outputs:
   dist/artifact.html  - body-only variant for claude.ai Artifacts (no <html>/<head>/<body>, no import map:
                         three + addons come from jsDelivr's +esm bundles so bare specifiers are not needed).
 """
-import base64, os, re
+import base64, os, re, json
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 SITE = os.path.join(ROOT, 'site')
@@ -59,15 +59,15 @@ def bundle(esm):
         lines.append(f"import * as THREE from '{THREE}/+esm';")
         for what, path in ADDON_IMPORTS:
             lines.append(f"import {what} from '{THREE}/examples/jsm/{path}/+esm';")
-        # world.js imports (GLTFLoader, BufferGeometryUtils)
-        lines.append(f"import {{ GLTFLoader }} from '{THREE}/examples/jsm/loaders/GLTFLoader.js/+esm';")
-        lines.append(f"import * as BufferGeometryUtils from '{THREE}/examples/jsm/utils/BufferGeometryUtils.js/+esm';")
+        # world.js imports (GLTFLoader, BufferGeometryUtils) unless main.js already pulled them in
+        if not any(p == 'loaders/GLTFLoader.js' for _, p in ADDON_IMPORTS): lines.append(f"import {{ GLTFLoader }} from '{THREE}/examples/jsm/loaders/GLTFLoader.js/+esm';")
+        if not any(p == 'utils/BufferGeometryUtils.js' for _, p in ADDON_IMPORTS): lines.append(f"import * as BufferGeometryUtils from '{THREE}/examples/jsm/utils/BufferGeometryUtils.js/+esm';")
     else:
         lines.append("import * as THREE from 'three';")
         for what, path in ADDON_IMPORTS:
             lines.append(f"import {what} from 'three/addons/{path}';")
-        lines.append("import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';")
-        lines.append("import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';")
+        if not any(p == 'loaders/GLTFLoader.js' for _, p in ADDON_IMPORTS): lines.append("import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';")
+        if not any(p == 'utils/BufferGeometryUtils.js' for _, p in ADDON_IMPORTS): lines.append("import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';")
     head = '\n'.join(lines) + f"\nconst KIT_URL = '{glb_uri}';\n"
     audio_names = exported_names(audio)
     audio_iife = "// ---------------- audio.js ----------------\nconst AUDIO = (() => {\n" + re.sub(r"^export (?=(?:const|let|function|class) )", '', strip_imports(audio), flags=re.M) + \
@@ -76,9 +76,36 @@ def bundle(esm):
     main_body = strip_imports(main).replace("'./assets/kit.glb?v=4'", 'KIT_URL')
     return head + audio_iife + world_iife + "// ---------------- main.js ----------------\n" + main_body
 
-# ---- full standalone page (import map)
+# ---- vendor three + addons so dist/index.html has no network dependency at all
+import urllib.request
+VENDOR = os.path.join(ROOT, 'vendor')
+os.makedirs(VENDOR, exist_ok=True)
+def fetch(url, name):
+    path = os.path.join(VENDOR, name)
+    if not os.path.exists(path):
+        print('fetching', url)
+        data = urllib.request.urlopen(url, timeout=60).read()
+        with open(path, 'wb') as f:
+            f.write(data)
+    return read(path)
+def data_url(js):
+    return 'data:text/javascript;base64,' + base64.b64encode(js.encode('utf-8')).decode('ascii')
+ADDON_PATHS = list(dict.fromkeys([path for _, path in ADDON_IMPORTS] + ['loaders/GLTFLoader.js', 'utils/BufferGeometryUtils.js']))
+three_src = fetch(THREE + '/+esm', 'three.esm.js')   # the +esm bundle is self-contained; build/three.module.js imports ./three.core.js which a data: URL cannot resolve
+assert not re.search(r"from\s*[\"']/npm/", three_src)
+imports = { 'three': data_url(three_src) }
+for path in ADDON_PATHS:
+    src = fetch(THREE + '/examples/jsm/' + path + '/+esm', path.replace('/', '__') + '.esm.js')
+    # jsDelivr's bundle imports three by absolute path; point it back at the bare specifier so the import map serves it inline
+    src = src.replace('"/npm/three@0.184.0/+esm"', '"three"').replace("'/npm/three@0.184.0/+esm'", "'three'")
+    assert not re.search(r"from\s*[\"']/npm/", src), 'unexpected external import in ' + path
+    imports['three/addons/' + path] = data_url(src)
+inline_importmap = '<script type="importmap">\n' + json.dumps({ 'imports': imports }) + '\n</script>\n'
+
+# ---- full standalone page (inline import map → works offline)
 im_block = re.search(r'<script type="importmap">.*?</script>\s*', html, flags=re.S).group(0)
-full = html.replace('<script type="module" src="./main.js"></script>', '<script type="module">\n' + bundle(False) + '\n</script>')
+full = html.replace(im_block, inline_importmap)
+full = full.replace('<script type="module" src="./main.js"></script>', '<script type="module">\n' + bundle(False) + '\n</script>')
 with open(os.path.join(DIST, 'index.html'), 'w', encoding='utf-8') as f:
     f.write(full)
 

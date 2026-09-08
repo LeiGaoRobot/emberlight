@@ -27,6 +27,10 @@ D:/AI/tools/Blender/blender.exe -b -P build_kit.py -- --out D:/AI/emberlight   #
 - 触屏:粗指针设备自动显示左半屏虚拟摇杆 + 右侧 Heavy/Dash/Nova/Swap/Forge 圆钮;自动攻击默认开,所以不需要鼠标瞄准
 - 帧率自适应:连续低于 42 fps 时 pixelRatio 逐档降到 0.7,回到 57 fps 以上 12 s 后逐档升回;切到后台自动暂停
 
+## 会话 A 交付(2026-09-09,见 CHANGELOG v2.5)
+
+触屏横竖屏布局、WebGL/CDN 失败兜底、**离线单文件**(`vendor/` 里是 three +esm 与 addon 包,`dist/index.html` 无任何外部脚本)、存档版本迁移、弱机自动降档(低画质 240 敌人 85 draw call)、手柄、错误日志与诊断复制。验收细节在 CHANGELOG。
+
 ## 难度曲线(autopilot 实测)
 
 `__emberlight.simRun(秒)` 用内置 AI(绕人群走位、血量低于 35% 或被 4 只贴身时逃跑、按条件放新星/重击/冲刺、路过铁匠铺就升级)跑整局:

@@ -25,8 +25,8 @@
     --bg: #1a1524;
   }
   * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-family: "Source Sans 3", "Segoe UI", system-ui, sans-serif; overflow: hidden; user-select: none; -webkit-user-select: none; }
-  #c { position: fixed; inset: 0; display: block; width: 100%; height: 100%; cursor: crosshair; }
+  html, body { margin: 0; height: 100%; height: 100dvh; background: var(--bg); -webkit-tap-highlight-color: transparent; overscroll-behavior: none; color: var(--ink); font-family: "Source Sans 3", "Segoe UI", system-ui, sans-serif; overflow: hidden; user-select: none; -webkit-user-select: none; }
+  #c { position: fixed; inset: 0; display: block; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
   #vignette { position: fixed; inset: 0; pointer-events: none; z-index: 2; background: radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0) 55%, rgba(0,0,0,.18) 100%); }
   #hurt { position: fixed; inset: 0; pointer-events: none; z-index: 3; background: radial-gradient(ellipse at 50% 50%, rgba(255,60,40,0) 40%, rgba(255,60,40,.55) 100%); opacity: 0; transition: opacity .08s; }
   #flash { position: fixed; inset: 0; pointer-events: none; z-index: 3; background: #fff; opacity: 0; }
@@ -134,7 +134,12 @@
   #touchBtns { position: absolute; right: 14px; bottom: 110px; display: none; flex-direction: column; gap: 10px; align-items: flex-end; }
   .tbtn { pointer-events: auto; width: 68px; height: 68px; border-radius: 50%; border: 1px solid rgba(255,255,255,.2); background: rgba(46,32,66,.8); color: var(--ink); font: inherit; font-size: 12px; font-weight: 700; }
   body.touch #touchBtns { display: flex; }
-  body.touch #weapon, body.touch #botr .stat { display: none; }
+  body.touch #weapon, body.touch #botr { display: none; }
+  .tbtn.cd { opacity: .38; }
+  .tbtn.hot { box-shadow: 0 0 0 2px rgba(247,195,154,.7); }
+  #padHint { position: absolute; left: 50%; top: 52px; transform: translateX(-50%); font-size: 11px; color: var(--muted); letter-spacing: .08em; display: none; }
+  body.pad #padHint { display: block; }
+  #lowToast { position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%); z-index: 8; background: rgba(46,32,66,.92); border: 1px solid var(--line); color: var(--ink); padding: 8px 14px; border-radius: 12px; font-size: 13px; display: none; }
   body.touch #botr { bottom: 20px; right: 14px; }
   body.touch.title #touchBtns { display: none; }
   .statrow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 6px 0 14px; }
@@ -171,6 +176,29 @@
   #about .modal p { color: var(--muted); font-size: 14px; line-height: 1.6; }
   #about .modal p b { color: var(--ink); }
   @media (max-width: 900px) { #status { width: 180px; } #minimap { width: 110px; height: 110px; } h1 { font-size: 56px; } #title .panel { left: 5vw; max-width: 80vw; } }
+  /* phone landscape: short viewport, keep only what matters */
+  @media (max-height: 520px) {
+    #status { width: 150px; top: 8px; left: 10px; } #status .brand { display: none; } #status .hp { font-size: 12px; margin-top: 0; }
+    #forgeText, #statText, #bestText, #status .pill { display: none; } #status .row { margin-top: 3px; font-size: 10px; }
+    #topc { top: 6px; } #timer { font-size: 14px; } #sub { font-size: 10px; } #banner { margin-top: 8px; font-size: 13px; white-space: normal; max-width: 60vw; }
+    #topr { top: 8px; right: 10px; gap: 6px; } #minimap { width: 78px; height: 78px; border-radius: 10px; } #topr .pill { padding: 4px 9px; font-size: 11px; }
+    #weather { bottom: 6px; } #weather .label { display: none; } #weather .pill { padding: 4px 9px; font-size: 11px; }
+    #botr { bottom: 8px; right: 10px; font-size: 11px; } #botr .stat { display: none; }
+    #touchBtns { bottom: 44px; right: 8px; gap: 6px; flex-direction: row; flex-wrap: wrap; width: 132px; justify-content: flex-end; }
+    .tbtn { width: 50px; height: 50px; font-size: 10px; }
+    #title .panel { transform: none; top: 8px; max-width: 70vw; } h1 { font-size: 34px; margin: 4px 0 6px; } .lead { font-size: 14px; } .desc { font-size: 12px; margin: 6px 0 10px; }
+    #title .controls, #title .tiny { display: none; } .btn { padding: 9px 16px; font-size: 13px; min-width: 0; }
+    .modal { padding: 14px 16px; max-height: 92vh; overflow-y: auto; } .modal h2 { font-size: 20px; margin-bottom: 2px; } .choice { padding: 8px 12px; margin-top: 6px; }
+  }
+  /* phone portrait */
+  @media (max-width: 520px) {
+    #status { width: 140px; } #forgeText, #statText, #bestText { display: none; } #status .pill { padding: 5px 10px; font-size: 11px; }
+    #timer { font-size: 15px; } #banner { font-size: 13px; white-space: normal; max-width: 90vw; margin-top: 10px; }
+    #minimap { width: 84px; height: 84px; } #topr .pill { padding: 4px 9px; font-size: 11px; }
+    #weather .pill { padding: 5px 9px; font-size: 11px; } #botr { font-size: 11px; }
+    h1 { font-size: 44px; } #title .panel { left: 5vw; right: 5vw; max-width: none; } .btn { min-width: 0; width: 100%; }
+    #title .controls { display: none; }
+  }
 </style>
 </head>
 <body>
@@ -226,6 +254,7 @@
     <div class="stat" id="killText">0 defeated · 0 elites</div>
   </div>
   <div id="dmgLayer"></div>
+  <div id="padHint">🎮 Gamepad connected</div>
   <div id="stick"><div id="stickKnob"></div></div>
   <div id="touchBtns">
     <button class="tbtn" id="tHeavy">Heavy</button><button class="tbtn" id="tDash">Dash</button><button class="tbtn" id="tNova">Nova</button><button class="tbtn" id="tSwap">Swap</button><button class="tbtn" id="tForge">Forge</button>
@@ -294,7 +323,7 @@
     <div class="srow" id="setSfx"><span class="k">Sound effects</span><input type="range" min="0" max="100" value="69"></div>
     <div class="srow" id="setLang"><span class="k">Language / 语言</span><span class="v">English</span><button class="btn ghost">Toggle</button></div>
   </div>
-  <div class="actions"><button class="btn" id="resumeBtn">Resume &nbsp;(Esc)</button><button class="btn ghost" id="quitBtn">Back to title</button></div>
+  <div class="actions"><button class="btn" id="resumeBtn">Resume &nbsp;(Esc)</button><button class="btn ghost" id="quitBtn">Back to title</button><button class="btn ghost" id="diagBtn" style="min-width:0">Copy diagnostics</button></div>
 </div></div></div>
 
 <div id="end" class="overlay"><div class="center"><div class="modal">
@@ -306,6 +335,25 @@
 </div></div></div>
 
 <div id="loading"><div><div class="t">Emberlight</div><div class="bar"><i id="loadBar"></i></div><div class="s" id="loadText">Waking the valley…</div></div></div>
+<div id="fatal" class="overlay"><div class="center"><div class="modal"><h2 id="fatalTitle">Something went wrong</h2><p id="fatalText" style="color:var(--muted);font-size:14px;line-height:1.6"></p><div class="actions"><button class="btn" onclick="location.reload()">Reload</button></div></div></div></div>
+<div id="lowToast"></div>
+<div id="errToast" style="position:fixed;left:12px;bottom:12px;z-index:30;display:none;background:rgba(120,30,40,.92);color:#fff;font:12px 'Source Sans 3',system-ui,sans-serif;padding:8px 12px;border-radius:10px;max-width:60vw"></div>
+<script>
+  // boot guard + diagnostics ring buffer: plain script so it runs even when the module graph fails to load
+  window.__emberLogs = [];
+  window.__emberLog = function (kind, msg) { const L = window.__emberLogs; L.push(new Date().toISOString().slice(11, 19) + ' ' + kind + ' ' + String(msg).slice(0, 300)); if (L.length > 20) L.shift(); };
+  window.__emberFatal = function (title, text) { const f = document.getElementById('fatal'); if (!f) return; document.getElementById('fatalTitle').textContent = title; document.getElementById('fatalText').textContent = text; f.classList.add('show'); const l = document.getElementById('loading'); if (l) l.style.display = 'none'; };
+  window.addEventListener('error', function (e) { window.__emberLog('error', (e.message || e) + (e.filename ? ' @' + e.filename.split('/').pop() + ':' + e.lineno : '')); const t = document.getElementById('errToast'); if (t && window.__emberBooted) { t.textContent = (document.documentElement.lang === 'zh-CN' ? '出错了,已记录。暂停菜单里可复制诊断信息。' : 'Something broke and was logged. Copy diagnostics from the pause menu.'); t.style.display = 'block'; clearTimeout(t._h); t._h = setTimeout(function () { t.style.display = 'none'; }, 6000); } });
+  window.addEventListener('unhandledrejection', function (e) { window.__emberLog('promise', e.reason && (e.reason.message || e.reason)); });
+  (function () {
+    var c = document.createElement('canvas'); var gl = null;
+    try { gl = c.getContext('webgl2'); } catch (err) { gl = null; }
+    if (!gl) { window.__emberNoWebGL = true; window.__emberFatal('This browser cannot run Emberlight', 'WebGL 2 is not available here. Try a current Chrome, Edge, Firefox or Safari, and make sure hardware acceleration is switched on. / 当前浏览器没有 WebGL 2,请换用新版 Chrome / Edge / Firefox / Safari,并确认已开启硬件加速。'); }
+  })();
+  setTimeout(function () {
+    if (!window.__emberBooted && !window.__emberNoWebGL) window.__emberFatal('Still loading…', 'The game engine (three.js from cdn.jsdelivr.net) has not loaded after 20 seconds. Check your connection or a blocked CDN, then reload. The single-file download of Emberlight plays offline. / 游戏引擎(three.js,来自 cdn.jsdelivr.net)20 秒内没加载完,可能是网络或 CDN 被拦。请检查网络后重载;单文件版可离线游玩。');
+  }, 20000);
+</script>
 
 <script type="importmap">
 {

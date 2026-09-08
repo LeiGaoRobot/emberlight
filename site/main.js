@@ -7,8 +7,9 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { Kit, DynSet, buildGround, generateMap, districtAt, DISTRICTS, ROADS, ISLAND_R, PLAY_R, collideStatic, Grid, setGlow, MATS, treeUniforms, mulberry32, vnoise } from './world.js?v=15';
-import * as AUDIO from './audio.js?v=15';
+import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
+import { Kit, DynSet, buildGround, generateMap, districtAt, DISTRICTS, ROADS, ISLAND_R, PLAY_R, collideStatic, Grid, setGlow, MATS, treeUniforms, mulberry32, vnoise } from './world.js?v=19';
+import * as AUDIO from './audio.js?v=19';
 
 const $ = (s) => document.querySelector(s);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -21,14 +22,20 @@ const BOSS_AT = 480;         // 8 minutes
 // =====================================================================
 // renderer / scene / camera
 // =====================================================================
+window.__emberBooted = true;
 const canvas = $('#c');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+if (window.__emberNoWebGL) throw new Error('WebGL2 unavailable');
+let renderer;
+try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' }); }
+catch (err) { window.__emberFatal('Could not start the renderer', 'WebGL refused to start: ' + err.message + '. Close other GPU-heavy tabs and reload.'); throw err; }
+canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); window.__emberLog('gpu', 'context lost'); window.__emberFatal('The graphics context was lost', 'The browser dropped the WebGL context (usually a driver reset or memory pressure). Reload to continue. / 显卡上下文丢失(通常是驱动重置或显存不足),请重载。'); });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
+renderer.info.autoReset = false;
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0xc9d6e2, 40, 120);
@@ -175,8 +182,22 @@ let P = newPlayer();
 // =====================================================================
 // settings (persisted) + translations
 // =====================================================================
-const SET = Object.assign({ quality: 'high', shake: true, numbers: true, music: 0.28, sfx: 0.55, lang: 'en' }, (() => { try { return JSON.parse(localStorage.getItem('emberlight.settings') || '{}'); } catch (e) { return {}; } })());
-function saveSettings() { try { localStorage.setItem('emberlight.settings', JSON.stringify(SET)); } catch (e) { /* ignore */ } }
+const SET_V = 1, META_V = 1;
+const SET = Object.assign({ v: SET_V, quality: 'high', shake: true, numbers: true, music: 0.28, sfx: 0.55, lang: 'en' }, (() => {
+  try {
+    const raw = JSON.parse(localStorage.getItem('emberlight.settings') || '{}');
+    if (typeof raw !== 'object' || raw === null) return {};
+    // migrations by version: v0 (no field) → v1: clamp volumes, drop unknown keys
+    const out = {};
+    for (const k of ['quality', 'shake', 'numbers', 'music', 'sfx', 'lang']) if (k in raw) out[k] = raw[k];
+    if (typeof out.music === 'number') out.music = Math.min(0.5, Math.max(0, out.music)); else delete out.music;
+    if (typeof out.sfx === 'number') out.sfx = Math.min(0.8, Math.max(0, out.sfx)); else delete out.sfx;
+    if (out.quality !== 'high' && out.quality !== 'low') delete out.quality;
+    if (out.lang !== 'en' && out.lang !== 'zh') delete out.lang;
+    return out;
+  } catch (e) { window.__emberLog('save', 'settings unreadable, reset'); return {}; }
+})());
+function saveSettings() { try { localStorage.setItem('emberlight.settings', JSON.stringify(SET)); } catch (e) { window.__emberLog('save', 'settings write failed: ' + e.message); } }
 const ZH = {
   // hud
   'Auto attack ON': '自动攻击 开', 'Auto attack OFF': '自动攻击 关', 'Level': '等级', 'XP': '经验', 'forge shards': '锻造币', 'forge shard': '锻造币',
@@ -245,7 +266,7 @@ const HTML_ZH = {
   '#archiveBtn': '余烬档案', '#aboutBtn': '关于', '#archiveClose': '返回', '#aboutClose': '返回',
   '#archive h2': '余烬档案', '#archive .modal > .sub': '山谷对你的记忆。只存在本机。',
   '#forge h2': '铁匠铺', '#forgeClose': '离开 &nbsp;(F / Esc)', '#forgeRest': '在炉边休整 —— 回满生命(5 锻造币)',
-  '#pause h2': '已暂停', '#pause .modal > .sub': '荒野在等你。', '#resumeBtn': '继续 &nbsp;(Esc)', '#quitBtn': '返回标题',
+  '#pause h2': '已暂停', '#pause .modal > .sub': '荒野在等你。', '#resumeBtn': '继续 &nbsp;(Esc)', '#quitBtn': '返回标题', '#diagBtn': '复制诊断信息',
   '#endSecondary': '返回标题',
   '#weather .label': '活着的山谷', '#swapBtn': '<b>Q</b> 切换武器', '#forgeHint': '<b>F</b> 进入铁匠铺', '#pauseBtn': '暂停',
   '#dashText b': '空格', '#settingsTitle': '设置', '#setQuality .k': '画质', '#setShake .k': '屏幕抖动', '#setNumbers .k': '伤害数字', '#setMusic .k': '音乐', '#setSfx .k': '音效', '#setLang .k': '语言 / Language',
@@ -279,10 +300,11 @@ function applyQuality() {
   sun.castShadow = !low;
   renderer.setPixelRatio(low ? Math.min(window.devicePixelRatio, 1.0) : Math.min(window.devicePixelRatio, 1.5));
   if (gtaoPass) gtaoPass.enabled = !low;
+  for (const k in enemySets) if (enemySets[k].outline) enemySets[k].outline.visible = !low;
   if (bloomPass) bloomPass.enabled = true;
   resizeComposer();
-  if (world) for (const name of ['Tuft', 'Reed', 'Mushroom']) { const set = world.sets[name]; if (!set) continue; for (const m of set.meshes) { m.count = low ? Math.floor(set.visible * 0.45) : set.visible; } }
-  S.qualityLow = low;
+  if (world) for (const name of ['Tuft', 'Reed', 'Mushroom']) { const set = world.sets[name]; if (!set) continue; for (const m of set.meshes) { m.count = low ? Math.floor(set.visible * 0.3) : set.visible; } }
+  S.qualityLow = low; S.cullX = null;   // force a rebuild with the new radius
 }
 
 // =====================================================================
@@ -294,11 +316,23 @@ const UNLOCKS = [
   { key: 'boltstart', name: 'Cinder in the hand', how: 'Defeat 3000 creatures in total', gives: 'Runs start with the Cinder Bolt, already forged once', test: (m) => m.totalKills >= 3000 },
 ];
 function loadMeta() {
-  try { const m = JSON.parse(localStorage.getItem('emberlight.meta') || 'null'); if (m && m.runs) return m; } catch (e) { /* ignore */ }
-  return { totalKills: 0, bossKills: 0, runsPlayed: 0, bestTime: 0, runs: [], unlocks: {} };
+  const fresh = { v: META_V, totalKills: 0, bossKills: 0, runsPlayed: 0, bestTime: 0, runs: [], unlocks: {} };
+  try {
+    const m = JSON.parse(localStorage.getItem('emberlight.meta') || 'null');
+    if (!m || typeof m !== 'object') return fresh;
+    // migrate: fill missing fields, coerce types, keep only well-formed runs, unknown unlock keys dropped
+    const out = Object.assign({}, fresh);
+    for (const k of ['totalKills', 'bossKills', 'runsPlayed', 'bestTime']) out[k] = Number.isFinite(m[k]) ? Math.max(0, Math.floor(m[k])) : 0;
+    out.runs = Array.isArray(m.runs) ? m.runs.filter((r) => r && Number.isFinite(r.time)).map((r) => ({ time: Math.floor(r.time), kills: r.kills | 0, level: r.level | 0, won: !!r.won, boss: !!r.boss, date: String(r.date || '') })).slice(0, 5) : [];
+    out.unlocks = {};
+    if (m.unlocks && typeof m.unlocks === 'object') for (const u of UNLOCKS) if (m.unlocks[u.key]) out.unlocks[u.key] = m.unlocks[u.key];
+    out.v = META_V;
+    if (m.v !== META_V) window.__emberLog('save', 'meta migrated from v' + (m.v || 0));
+    return out;
+  } catch (e) { window.__emberLog('save', 'meta unreadable, reset'); return fresh; }
 }
 const META = loadMeta();
-function saveMeta() { try { localStorage.setItem('emberlight.meta', JSON.stringify(META)); } catch (e) { /* ignore */ } }
+function saveMeta() { try { localStorage.setItem('emberlight.meta', JSON.stringify(META)); } catch (e) { window.__emberLog('save', 'meta write failed: ' + e.message); } }
 const unlocked = (k) => !!META.unlocks[k];
 function recordRun(won) {
   const run = { time: Math.floor(S.t), kills: S.stats.kills, level: P.level, won, boss: !!S.bossKilled, date: new Date().toISOString().slice(0, 10) };
@@ -344,11 +378,9 @@ function buildWorld() {
   loadBar.style.transform = 'scaleX(0.9)';
   MATS.snow.opacity = 0;
   // rigs
-  playerRig = kit.rigs.Player.clone(true);
-  playerRig.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.material = rigMaterial(o.material); } });
+  playerRig = mergeRig(kit.rigs.Player.clone(true));
   scene.add(playerRig);
-  wardenRig = kit.rigs.Warden.clone(true);
-  wardenRig.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.material = rigMaterial(o.material); } });
+  wardenRig = mergeRig(kit.rigs.Warden.clone(true));
   wardenRig.visible = false;
   scene.add(wardenRig);
   ANIM.p = makeRigAnimator(playerRig, 'P_');
@@ -401,6 +433,34 @@ function playOnce(anim, key, timeScale = 1) {
 function setBase(anim, walkW, walkSpeed = 1) {
   anim.actions.walk.setEffectiveWeight(walkW); anim.actions.idle.setEffectiveWeight(1 - walkW);
   anim.actions.walk.setEffectiveTimeScale(walkSpeed);
+}
+// each animated Empty keeps one vertex-coloured body mesh and one glow mesh instead of a dozen tiny meshes
+const GLOW_RE = /EnemyEye|EmberCore|HotMetal|PlayerLamp/;
+function mergeRig(root) {
+  const bodyMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, envMapIntensity: 0.5 });
+  const glowMatR = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
+  const empties = [];
+  root.traverse((o) => { if (!o.isMesh && o !== root) empties.push(o); });
+  for (const e of empties) {
+    const meshes = e.children.filter((c) => c.isMesh);
+    if (!meshes.length) continue;
+    const body = [], glow = [];
+    for (const m of meshes) {
+      m.updateMatrix();
+      const g = m.geometry.clone().applyMatrix4(m.matrix);
+      for (const k of Object.keys(g.attributes)) if (!['position', 'normal'].includes(k)) g.deleteAttribute(k);
+      const isGlow = GLOW_RE.test(m.material.name || '');
+      const c = isGlow ? (m.material.emissive && m.material.emissive.getHex() ? m.material.emissive.clone().multiplyScalar(1.6) : m.material.color) : m.material.color;
+      const n = g.attributes.position.count, col = new Float32Array(n * 3);
+      for (let i = 0; i < n; i++) { col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
+      g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      (isGlow ? glow : body).push(g.index ? g.toNonIndexed() : g);
+      e.remove(m);
+    }
+    if (body.length) { const mm = new THREE.Mesh(BufferGeometryUtils.mergeGeometries(body, false), bodyMat); mm.castShadow = true; mm.name = e.name + '_body'; e.add(mm); }
+    if (glow.length) { const mm = new THREE.Mesh(BufferGeometryUtils.mergeGeometries(glow, false), glowMatR); mm.name = e.name + '_glow'; e.add(mm); }
+  }
+  return root;
 }
 function rigMaterial(m) {
   const name = m.name || '';
@@ -723,8 +783,10 @@ function onAction(a) {
   if (a === 'hideui') { S.hideUI = !S.hideUI; document.body.classList.toggle('hide-ui', S.hideUI); return; }
   if (a === 'mute') { toggleSound(); return; }
   if (S.modal === 'levelup') { if (/^c[1-4]$/.test(a)) pickTalent(Number(a[1]) - 1); return; }
-  if (S.modal === 'forge') { if (a === 'forge' || a === 'pause') closeForge(); return; }
-  if (S.modal === 'pause') { if (a === 'pause') togglePause(); return; }
+  if (S.modal === 'forge') { if (a === 'forge' || a === 'pause') closeForge(); if (a === 'c1' || a === 'c2' || a === 'c3') { const bs = [...document.querySelectorAll('#forgeTracks .btn:not([disabled])')]; if (bs[Number(a[1]) - 1]) bs[Number(a[1]) - 1].click(); } return; }
+  if (S.modal === 'pause') { if (a === 'pause' || a === 'dash') togglePause(); return; }
+  if (S.modal === 'end') { if (a === 'dash') $('#endPrimary').click(); if (a === 'heavy') $('#endSecondary').click(); return; }
+  if (S.phase === 'title') { if (a === 'dash') $('#startBtn').click(); return; }
   if (S.phase !== 'run' || S.modal) return;
   switch (a) {
     case 'dash': tryDash(); break;
@@ -758,15 +820,42 @@ function setupTouch() {
   };
   const end = (e) => { for (const t of e.changedTouches) if (t.identifier === S.touch.id) { S.touch.id = null; S.touch.active = false; S.touch.dx = S.touch.dy = 0; stick.style.display = 'none'; knob.style.transform = ''; } };
   canvas.addEventListener('touchstart', (e) => { AUDIO.ensureAudio(); AUDIO.resume(); start(e); e.preventDefault(); }, { passive: false });
+  document.addEventListener('touchend', () => { AUDIO.ensureAudio(); AUDIO.resume(); }, { passive: true });
   canvas.addEventListener('touchmove', move, { passive: false });
   canvas.addEventListener('touchend', end); canvas.addEventListener('touchcancel', end);
   for (const [id, act] of [['tDash', 'dash'], ['tNova', 'nova'], ['tHeavy', 'heavy'], ['tSwap', 'swap'], ['tForge', 'forge']]) {
     $('#' + id).addEventListener('touchstart', (e) => { e.preventDefault(); onAction(act); }, { passive: false });
   }
 }
+// gamepad: left stick moves, right stick aims (manual attack while pushed), buttons map onto the same actions
+const PAD = { on: false, mx: 0, mz: 0, ax: 0, az: 0, prev: {}, aiming: false };
+const PAD_BUTTONS = { 0: 'dash', 1: 'heavy', 2: 'nova', 3: 'swap', 4: 'forge', 5: 'wx', 6: 'attack', 7: 'attack', 8: 'auto', 9: 'pause', 10: 'auto', 12: 'c1', 13: 'c3', 14: 'c2', 15: 'c4' };
+function pollGamepad() {
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  let gp = null;
+  for (const p of pads) if (p && p.connected) { gp = p; break; }
+  if (!gp) { if (PAD.on) { PAD.on = false; document.body.classList.remove('pad'); S.keys.attack = false; refreshPadLabels(); } PAD.mx = PAD.mz = 0; PAD.aiming = false; return; }
+  if (!PAD.on) { PAD.on = true; document.body.classList.add('pad'); AUDIO.ensureAudio(); refreshPadLabels(); }
+  const dz = (v) => Math.abs(v) < 0.18 ? 0 : (v - Math.sign(v) * 0.18) / 0.82;
+  PAD.mx = dz(gp.axes[0] || 0); PAD.mz = dz(gp.axes[1] || 0);
+  PAD.ax = dz(gp.axes[2] || 0); PAD.az = dz(gp.axes[3] || 0);
+  PAD.aiming = Math.hypot(PAD.ax, PAD.az) > 0.3;
+  for (const i of Object.keys(PAD_BUTTONS)) {
+    const b = gp.buttons[i]; const down = !!(b && (b.pressed || b.value > 0.5));
+    const a = PAD_BUTTONS[i];
+    if (down && !PAD.prev[i]) { if (a === 'attack') S.keys.attack = true; else onAction(a); }
+    if (!down && PAD.prev[i] && a === 'attack') S.keys.attack = false;
+    PAD.prev[i] = down;
+  }
+}
 // mouse → ground plane (y = 0)
 const _ray = new THREE.Vector3(), _ndc = new THREE.Vector2();
 function updateAim() {
+  if (PAD.on && PAD.aiming) {
+    const fwd = new THREE.Vector3(-CAM_DIR.x, 0, -CAM_DIR.z).normalize(); const right = new THREE.Vector3(-fwd.z, 0, fwd.x);
+    S.aim.set(P.x + (fwd.x * -PAD.az + right.x * PAD.ax) * 6, 0, P.z + (fwd.z * -PAD.az + right.z * PAD.ax) * 6);
+    return;
+  }
   _ndc.set((S.mouse.x / window.innerWidth) * 2 - 1, -(S.mouse.y / window.innerHeight) * 2 + 1);
   _ray.set(_ndc.x, _ndc.y, 0.5).unproject(camera).sub(camera.position).normalize();
   const t = -camera.position.y / _ray.y;
@@ -790,6 +879,21 @@ $('#forgeHint').addEventListener('click', () => onAction('forge'));
 $('#pauseBtn').addEventListener('click', () => { if (S.phase === 'run' && (!S.modal || S.modal === 'pause')) togglePause(); });
 $('#resumeBtn').addEventListener('click', () => togglePause());
 $('#quitBtn').addEventListener('click', () => backToTitle());
+$('#diagBtn').addEventListener('click', async () => {
+  const gl = renderer.getContext(); const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+  const lines = [
+    'Emberlight ' + (window.__emberVersion || 'dev') + ' · ' + new Date().toISOString(),
+    'UA: ' + navigator.userAgent,
+    'GPU: ' + (dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : 'n/a') + ' · ' + window.innerWidth + 'x' + window.innerHeight + ' @' + renderer.getPixelRatio(),
+    'Quality ' + SET.quality + ' · fps ' + (S.fps || 0).toFixed(0) + ' · draw ' + renderer.info.render.calls + ' · tris ' + renderer.info.render.triangles,
+    'Run: t=' + Math.round(S.t) + ' level=' + P.level + ' enemies=' + S.enemies.length + ' district=' + S.district.key + ' phase=' + S.phase,
+    '--- last logs ---', ...(window.__emberLogs.length ? window.__emberLogs : ['(none)']),
+  ];
+  const text = lines.join('\n');
+  try { await navigator.clipboard.writeText(text); $('#diagBtn').textContent = SET.lang === 'zh' ? '已复制' : 'Copied'; }
+  catch (e) { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); $('#diagBtn').textContent = 'Copied'; } catch (e2) { $('#diagBtn').textContent = 'Copy failed'; } ta.remove(); }
+  setTimeout(() => { $('#diagBtn').textContent = SET.lang === 'zh' ? '复制诊断信息' : 'Copy diagnostics'; }, 2500);
+});
 $('#soundBtn').addEventListener('click', () => toggleSound());
 $('#forgeClose').addEventListener('click', () => closeForge());
 $('#forgeRest').addEventListener('click', () => forgeRest());
@@ -811,6 +915,15 @@ function toggleSound() {
   AUDIO.ensureAudio();
   AUDIO.setEnabled(!AUDIO.audioEnabled());
   $('#soundBtn').textContent = AUDIO.audioEnabled() ? tr('Sound') : tr('Sound off');
+}
+function refreshPadLabels() {
+  const pad = PAD.on, zh = SET.lang === 'zh';
+  $('#dashText b').textContent = pad ? 'A' : (zh ? '空格' : 'SPACE');
+  $('#novaText b').textContent = pad ? 'X' : 'E';
+  $('#swapBtn').innerHTML = `<b>${pad ? 'Y' : 'Q'}</b> ${tr('Switch weapon')}`;
+  $('#autoBtn').querySelector('b').textContent = pad ? 'LS' : 'Tab';
+  $('#forgeHint').innerHTML = `<b>${pad ? 'LB' : 'F'}</b> ${tr('Enter forge')}`;
+  $('#padHint').textContent = zh ? '🎮 已连接手柄 · 左摇杆移动 右摇杆瞄准 A 冲刺 B 重击 X 新星 Y 换武器' : '🎮 Gamepad · left stick move · right stick aim · A dash · B heavy · X nova · Y swap';
 }
 function refreshAutoBtn() { const b = $('#autoBtn'); b.innerHTML = `<b>Tab</b> ${tr(P.auto ? 'Auto attack ON' : 'Auto attack OFF')}`; b.classList.toggle('on', P.auto); }
 function refreshWeaponCard() {
@@ -958,6 +1071,7 @@ function moveVector() {
   if (S.keys.right) { x += right.x; z += right.z; }
   if (S.keys.left) { x -= right.x; z -= right.z; }
   if (S.touch && S.touch.active) { x += fwd.x * -S.touch.dy + right.x * S.touch.dx; z += fwd.z * -S.touch.dy + right.z * S.touch.dx; }
+  if (PAD.on && (PAD.mx || PAD.mz)) { x += fwd.x * -PAD.mz + right.x * PAD.mx; z += fwd.z * -PAD.mz + right.z * PAD.mx; }
   const len = Math.hypot(x, z);
   if (len > 0) { x /= len; z /= len; }
   return { x, z, len: Math.min(1, len) };
@@ -976,7 +1090,7 @@ function fireWeapon(dt) {
     // orbiting lanterns handle their own damage in updateOrbs
     return;
   }
-  const manual = S.mouse.down || S.keys.attack;
+  const manual = S.mouse.down || S.keys.attack || (PAD.on && PAD.aiming);
   let target = null;
   if (P.auto) target = nearestEnemy(w.type === 'melee' ? w.range * P.areaMult + 1.5 : w.range);
   if (!manual && !target) return;
@@ -1504,7 +1618,7 @@ function updatePlayer(dt) {
   collideStatic(P, world.obstacles, P.r);
   // facing: toward aim when idle / manual, toward movement when auto & moving and no target
   updateAim();
-  if (S.mouse.down || S.keys.attack || !P.auto) P.facing = Math.atan2(S.aim.x - P.x, S.aim.z - P.z);
+  if (S.mouse.down || S.keys.attack || !P.auto || (PAD.on && PAD.aiming)) P.facing = Math.atan2(S.aim.x - P.x, S.aim.z - P.z);
   else if (mv.len > 0 && P.attackT > 0.1) P.facing = Math.atan2(dx, dz);
   fireWeapon(dt);
   updateOrbs(dt);
@@ -1658,6 +1772,7 @@ function updateHUD() {
   dash.textContent = P.dashCd > 0 ? `${tr('Dash')} ${P.dashCd.toFixed(1)}s` : tr('Dash ready'); dash.className = P.dashCd > 0 ? 'cd' : 'ready';
   nova.textContent = P.novaCd > 0 ? `${tr('Ember nova')} ${Math.ceil(P.novaCd)}s` : tr('Ember nova ready'); nova.className = P.novaCd > 0 ? 'cd' : 'ready';
   $('#killText').textContent = zh ? `击败 ${S.stats.kills} · 精英 ${S.stats.elites}` : `${S.stats.kills} defeated · ${S.stats.elites} elites`;
+  if (S.touch) { $('#tDash').classList.toggle('cd', P.dashCd > 0); $('#tNova').classList.toggle('cd', P.novaCd > 0); $('#tHeavy').classList.toggle('cd', P.heavyCd > 0); $('#tForge').classList.toggle('hot', nearForge()); }
 }
 
 // =====================================================================
@@ -1672,6 +1787,7 @@ function loop(now) {
 }
 function tick(dt) {
   S.wall += dt; S.dtRaw = dt;
+  if (!S.stepping || S.padStub) pollGamepad();
   if (S.hitStop > 0) { S.hitStop -= dt; dt *= 0.08; }
   if (S.bossIntro > 0) { S.bossIntro -= dt; dt *= 0.2; }
   if (S.slowMo > 0) { S.slowMo -= dt; dt *= 0.35; }
@@ -1725,7 +1841,7 @@ function tick(dt) {
   ground.uniforms.uTime.value = S.wall;
   treeUniforms.uPlayer.value.set(P.x, 0, P.z);
   // static instancing: only upload what is near the camera focus (rebuilt when the focus moves ~6 units)
-  if (S.cullX == null || Math.hypot(S.camFx - S.cullX, S.camFz - S.cullZ) > 6) { S.cullX = S.camFx; S.cullZ = S.camFz; for (const k in world.sets) world.sets[k].rebuild(S.camFx, S.camFz, 58 + camDist * 0.6); if (S.qualityLow) applyQuality(); }
+  if (S.cullX == null || Math.hypot(S.camFx - S.cullX, S.camFz - S.cullZ) > 6) { S.cullX = S.camFx; S.cullZ = S.camFz; for (const k in world.sets) world.sets[k].rebuild(S.camFx, S.camFz, (S.qualityLow ? 44 : 58) + camDist * 0.6); if (S.qualityLow) applyQuality(); }
   // shadows: tighter, sharper frustum when zoomed in
   const shadowSpan = clamp(camDist * 0.95, 16, 36);
   if (Math.abs(shadowSpan - (S.shadowSpan || 0)) > 1.5) {
@@ -1738,10 +1854,17 @@ function tick(dt) {
   updateHUD();
   if ((S.frame = (S.frame || 0) + 1) % 3 === 0) drawMinimap();
   if (gradePass) { gradePass.uniforms.uTime.value = S.wall; const night = 1 - clamp((W.cur.sunI - 0.5) / 1.5, 0, 1); gradePass.uniforms.uVignette.value = 0.28 + night * 0.12; }
+  renderer.info.reset();   // autoReset is off so the whole post chain is counted, not just the last pass
   if (composer) composer.render(); else renderer.render(scene, camera);
   S.fpsAcc += dt; S.fpsN++;
   if (S.fpsAcc > 1) {
     S.fps = S.fpsN / S.fpsAcc; S.fpsAcc = 0; S.fpsN = 0;
+    // weak machine: if the first seconds of play cannot hold 40 fps on High, drop to Low once and say so
+    if (running && !S.stepping && SET.quality === 'high' && !S.autoLowDone && S.t > 2 && S.t < 12 && S.fps < 40) {
+      S.autoLowDone = true; SET.quality = 'low'; saveSettings(); applyQuality(); renderSettings();
+      const t = $('#lowToast'); t.textContent = SET.lang === 'zh' ? '检测到帧率偏低,已切换到低画质(暂停菜单可改回)' : 'Low frame rate detected — switched to Low quality (change it in the pause menu)'; t.style.display = 'block'; setTimeout(() => { t.style.display = 'none'; }, 6000);
+      window.__emberLog('perf', 'auto low quality at ' + S.fps.toFixed(0) + ' fps');
+    }
     // adaptive resolution: step the pixel ratio down when the GPU cannot keep up, back up when it can
     if (running && !S.stepping) {
       const pr = renderer.getPixelRatio();
@@ -1796,7 +1919,7 @@ function autopilot(dt) {
 // =====================================================================
 window.__emberlight = {
   S, P: () => P, W, world: () => world, startRun, endRun, spawnBoss, spawnEnemy, spawnAround, setWeather: (tod, wx) => { W.tod = tod; W.wx = wx; W.auto = false; refreshWeatherButtons(); },
-  cheat: (o) => Object.assign(P, o), META, recordRun, SET, applyLang, applyQuality, gainXp, AUDIO, camDist: (v) => { camDist = v; }, ANIM, clips: () => kit.clips.map((c) => c.name + ':' + c.duration.toFixed(2)), post: () => ({ ao: gtaoPass && gtaoPass.enabled, bloom: bloomPass && bloomPass.enabled, passes: composer && composer.passes.length }),
+  cheat: (o) => Object.assign(P, o), META, recordRun, SET, applyLang, applyQuality, gainXp, AUDIO, camDist: (v) => { camDist = v; }, PAD, pollGamepad, ANIM, clips: () => kit.clips.map((c) => c.name + ':' + c.duration.toFixed(2)), post: () => ({ ao: gtaoPass && gtaoPass.enabled, bloom: bloomPass && bloomPass.enabled, passes: composer && composer.passes.length }),
   project: (x, y, z) => { const v = new THREE.Vector3(x, y, z).project(camera); return { sx: (v.x * 0.5 + 0.5) * window.innerWidth, sy: (-v.y * 0.5 + 0.5) * window.innerHeight }; },
   slashes: () => S.slashes.map((m) => ({ ry: m.rotation.y, arc: m.userData.arc })), giveShards: (n) => { P.shards += n; }, teleport: (x, z) => { P.x = x; P.z = z; },
   capture: async (url) => {
