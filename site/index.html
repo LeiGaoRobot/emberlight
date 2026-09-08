@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Emberlight</title>
+<meta name="description" content="A wildwood without end. A little light worth keeping. A survivors-like built with Blender and three.js.">
+<meta name="theme-color" content="#1a1524">
+<meta property="og:title" content="Emberlight">
+<meta property="og:description" content="A wildwood without end. A little light worth keeping. Survive ten minutes in a valley with its own weather.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23f7c39a' d='M12 2c1 4 5 5 5 10a5 5 0 0 1-10 0c0-2 1-3 2-4 0 2 1 3 2 3 0-3-1-6 1-9z'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #f3ecdf;
+    --muted: #b9afc4;
+    --gold: #e9c46a;
+    --peach: #f7c39a;
+    --teal: #6fd6c5;
+    --panel: rgba(46, 32, 66, 0.82);
+    --panel2: rgba(30, 22, 44, 0.92);
+    --line: rgba(255, 255, 255, 0.08);
+    --bg: #1a1524;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-family: "Source Sans 3", "Segoe UI", system-ui, sans-serif; overflow: hidden; user-select: none; -webkit-user-select: none; }
+  #c { position: fixed; inset: 0; display: block; width: 100%; height: 100%; cursor: crosshair; }
+  #vignette { position: fixed; inset: 0; pointer-events: none; z-index: 2; background: radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0) 55%, rgba(0,0,0,.18) 100%); }
+  #hurt { position: fixed; inset: 0; pointer-events: none; z-index: 3; background: radial-gradient(ellipse at 50% 50%, rgba(255,60,40,0) 40%, rgba(255,60,40,.55) 100%); opacity: 0; transition: opacity .08s; }
+  #flash { position: fixed; inset: 0; pointer-events: none; z-index: 3; background: #fff; opacity: 0; }
+  #ui { position: fixed; inset: 0; z-index: 5; pointer-events: none; }
+  body.hide-ui #ui, body.hide-ui #vignette { display: none; }
+  body.title #ui > .hud:not(#weather), body.title #forgeHint, body.title #dmgLayer { display: none; }
+  .pill { pointer-events: auto; display: inline-flex; align-items: center; gap: 8px; background: var(--panel); border: 1px solid var(--line); color: var(--ink); padding: 7px 14px; border-radius: 12px; font-size: 13px; font-weight: 500; cursor: pointer; backdrop-filter: blur(6px); white-space: nowrap; }
+  .pill:hover { background: rgba(70, 50, 95, .9); }
+  .pill b { font-weight: 700; color: var(--peach); }
+  .pill.on b { color: var(--teal); }
+  .hud { position: absolute; }
+  /* ---------- top-left status ---------- */
+  #status { left: 18px; top: 14px; width: 220px; }
+  #status .brand { color: var(--gold); font-weight: 700; letter-spacing: .12em; font-size: 12px; }
+  #status .hp { font-weight: 600; font-size: 15px; margin-top: 6px; }
+  .bar { height: 9px; border-radius: 6px; background: rgba(0,0,0,.45); overflow: hidden; margin-top: 4px; border: 1px solid rgba(255,255,255,.06); }
+  .bar > i { display: block; height: 100%; width: 100%; transform-origin: left; transition: transform .12s linear; }
+  #hpbar > i { background: var(--peach); }
+  #xpbar > i { background: var(--teal); }
+  #xpbar { height: 6px; margin-top: 6px; }
+  #status .row { font-size: 11px; color: var(--muted); margin-top: 6px; letter-spacing: .04em; text-transform: uppercase; }
+  #status .row b { color: var(--ink); font-weight: 600; }
+  #status .row.shards { color: var(--peach); font-weight: 600; }
+  #status .pill { margin-top: 10px; }
+  /* ---------- top-center ---------- */
+  #topc { left: 50%; top: 14px; transform: translateX(-50%); text-align: center; }
+  #timer { font-size: 18px; font-weight: 600; letter-spacing: .04em; text-shadow: 0 2px 8px rgba(0,0,0,.6); }
+  #sub { font-size: 12px; color: var(--muted); margin-top: 2px; text-shadow: 0 2px 6px rgba(0,0,0,.6); }
+  #banner { margin-top: 26px; font-family: Fraunces, Georgia, serif; font-size: 18px; color: var(--gold); text-shadow: 0 2px 10px rgba(0,0,0,.7); opacity: 0; transition: opacity .6s; white-space: nowrap; }
+  #banner.show { opacity: 1; }
+  #boss { margin-top: 10px; width: 380px; display: none; }
+  #boss.show { display: block; }
+  #boss .name { font-size: 12px; letter-spacing: .18em; color: #ff9a6a; font-weight: 700; }
+  #bossbar { height: 8px; margin-top: 4px; }
+  #bossbar > i { background: linear-gradient(90deg, #ff6a3d, #ffb347); }
+  /* ---------- top-right ---------- */
+  #topr { right: 18px; top: 14px; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+  #topr .btns { display: flex; gap: 8px; }
+  #minimap { width: 150px; height: 150px; border-radius: 16px; background: rgba(20, 14, 30, .85); border: 1px solid var(--line); box-shadow: 0 6px 20px rgba(0,0,0,.35); }
+  /* ---------- bottom-left weapon ---------- */
+  #weapon { left: 18px; bottom: 18px; display: flex; align-items: flex-end; gap: 12px; }
+  #wcard { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; backdrop-filter: blur(6px); min-width: 160px; }
+  #wcard .name { color: var(--gold); font-weight: 700; letter-spacing: .08em; font-size: 13px; }
+  #wcard .keys { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  #wcard .keys b { color: var(--ink); font-weight: 600; }
+  /* ---------- bottom-center weather ---------- */
+  #weather { left: 50%; bottom: 18px; transform: translateX(-50%); text-align: center; }
+  #weather .label { font-size: 10px; letter-spacing: .22em; color: var(--muted); text-transform: uppercase; margin-bottom: 6px; text-shadow: 0 1px 4px rgba(0,0,0,.6); }
+  #weather .btns { display: flex; gap: 8px; justify-content: center; }
+  #forgeHint { position: absolute; left: 50%; bottom: 84px; transform: translateX(-50%); display: none; }
+  #forgeHint.show { display: inline-flex; }
+  /* ---------- bottom-right ---------- */
+  #botr { right: 18px; bottom: 18px; text-align: right; font-size: 13px; text-shadow: 0 2px 6px rgba(0,0,0,.6); }
+  #botr div { margin-top: 4px; }
+  #botr b { color: var(--peach); font-weight: 700; margin-right: 6px; }
+  #botr .ready { color: var(--ink); }
+  #botr .cd { color: var(--muted); }
+  #botr .stat { font-size: 11px; color: var(--muted); letter-spacing: .04em; }
+  /* ---------- floating damage numbers ---------- */
+  .dmg { position: absolute; left: 0; top: 0; pointer-events: none; font-weight: 700; font-size: 14px; color: #ffd9a0; text-shadow: 0 1px 3px rgba(0,0,0,.8); will-change: transform, opacity; transform: translate(-50%, -50%); display: none; }
+  .dmg.crit { color: #ffb347; font-size: 18px; }
+  .dmg.heal { color: #8ff0c8; }
+  .dmg.player { color: #ff8a7a; font-size: 16px; }
+  /* ---------- overlays ---------- */
+  .overlay { position: fixed; inset: 0; z-index: 10; display: none; pointer-events: auto; }
+  .overlay.show { display: block; }
+  #title { background: linear-gradient(90deg, rgba(20,14,30,.92) 0%, rgba(20,14,30,.75) 42%, rgba(20,14,30,0) 70%); }
+  #title .panel { position: absolute; left: 7vw; top: 50%; transform: translateY(-50%); max-width: 520px; }
+  .kicker { font-size: 11px; letter-spacing: .28em; color: var(--peach); text-transform: uppercase; }
+  h1 { font-family: Fraunces, Georgia, serif; font-weight: 600; font-size: clamp(56px, 7.5vw, 104px); line-height: .95; margin: 10px 0 18px; letter-spacing: -.01em; }
+  .lead { font-size: 22px; line-height: 1.3; font-weight: 500; }
+  .desc { color: var(--muted); font-size: 15px; line-height: 1.55; margin: 16px 0 22px; }
+  .btn { pointer-events: auto; display: inline-flex; align-items: center; justify-content: center; gap: 10px; background: var(--peach); color: #2a1a12; border: 0; border-radius: 12px; padding: 13px 26px; font: inherit; font-size: 15px; font-weight: 700; cursor: pointer; min-width: 240px; }
+  .btn:hover { filter: brightness(1.06); }
+  .btn.ghost { background: var(--panel); color: var(--ink); border: 1px solid var(--line); font-weight: 600; }
+  .controls { margin-top: 22px; font-size: 12px; color: var(--muted); line-height: 1.9; }
+  .controls b { color: var(--ink); font-weight: 600; }
+  .controls .dot { margin: 0 8px; opacity: .5; }
+  .tiny { font-size: 10px; letter-spacing: .2em; color: var(--muted); text-transform: uppercase; margin-top: 18px; }
+  .center { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(12, 8, 20, .55); backdrop-filter: blur(4px); }
+  .modal { background: var(--panel2); border: 1px solid var(--line); border-radius: 18px; padding: 28px 30px; width: min(560px, 92vw); box-shadow: 0 30px 80px rgba(0,0,0,.5); }
+  .modal h2 { font-family: Fraunces, Georgia, serif; font-weight: 600; font-size: 30px; margin: 0 0 6px; color: var(--gold); }
+  .modal .sub { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+  .choice { display: block; width: 100%; text-align: left; background: rgba(255,255,255,.05); border: 1px solid var(--line); color: var(--ink); border-radius: 12px; padding: 12px 16px; margin-top: 10px; font: inherit; cursor: pointer; }
+  .choice:hover, .choice:focus-visible { background: rgba(247, 195, 154, .14); border-color: rgba(247,195,154,.5); outline: none; }
+  .choice .t { font-weight: 700; font-size: 14px; }
+  .choice .t small { color: var(--muted); font-weight: 500; margin-left: 8px; }
+  .choice .d { color: var(--muted); font-size: 13px; margin-top: 3px; }
+  .choice.disabled { opacity: .45; cursor: default; }
+  .modal .actions { display: flex; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
+  .modal .actions .btn { min-width: 0; padding: 10px 18px; font-size: 14px; }
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; margin: 14px 0 6px; font-size: 14px; }
+  .stats b { color: var(--peach); }
+  .track { display: grid; grid-template-columns: 90px 1fr auto; align-items: center; gap: 12px; margin-top: 10px; padding: 10px 12px; background: rgba(255,255,255,.04); border-radius: 12px; }
+  .track .k { font-weight: 700; letter-spacing: .12em; font-size: 12px; color: var(--gold); }
+  .track .d { font-size: 13px; color: var(--muted); }
+  .track .d b { color: var(--ink); }
+  .track .pips { display: inline-flex; gap: 4px; margin-left: 8px; vertical-align: middle; }
+  .track .pips i { width: 10px; height: 10px; border-radius: 3px; background: rgba(255,255,255,.12); display: inline-block; }
+  .track .pips i.on { background: var(--teal); }
+  .track .btn { min-width: 0; padding: 8px 14px; font-size: 13px; }
+  .track .btn:disabled { opacity: .4; cursor: default; filter: none; }
+  #stick { position: absolute; width: 120px; height: 120px; border-radius: 50%; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.18); display: none; pointer-events: none; }
+  #stickKnob { position: absolute; left: 35px; top: 35px; width: 50px; height: 50px; border-radius: 50%; background: rgba(247,195,154,.7); }
+  #touchBtns { position: absolute; right: 14px; bottom: 110px; display: none; flex-direction: column; gap: 10px; align-items: flex-end; }
+  .tbtn { pointer-events: auto; width: 68px; height: 68px; border-radius: 50%; border: 1px solid rgba(255,255,255,.2); background: rgba(46,32,66,.8); color: var(--ink); font: inherit; font-size: 12px; font-weight: 700; }
+  body.touch #touchBtns { display: flex; }
+  body.touch #weapon, body.touch #botr .stat { display: none; }
+  body.touch #botr { bottom: 20px; right: 14px; }
+  body.touch.title #touchBtns { display: none; }
+  .statrow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 6px 0 14px; }
+  .statrow .stat { background: rgba(255,255,255,.04); border-radius: 12px; padding: 10px 12px; }
+  .statrow .stat b { display: block; font-size: 22px; color: var(--peach); font-variant-numeric: tabular-nums; }
+  .statrow .stat span { font-size: 11px; color: var(--muted); letter-spacing: .06em; text-transform: uppercase; }
+  .achgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .ach { border: 1px solid var(--line); border-radius: 12px; padding: 12px; opacity: .55; }
+  .ach.on { opacity: 1; border-color: rgba(111,214,197,.5); background: rgba(111,214,197,.06); }
+  .ach .t { font-weight: 700; font-size: 14px; }
+  .ach .d { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .ach .g { color: var(--teal); font-size: 12px; margin-top: 8px; }
+  .ach:not(.on) .g { color: var(--muted); }
+  table.runs { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+  table.runs td { padding: 6px 4px; border-top: 1px solid var(--line); color: var(--muted); }
+  table.runs td:first-child { color: var(--ink); font-weight: 600; }
+  .unlock { margin-top: 10px; padding: 10px 14px; border-radius: 12px; background: rgba(111,214,197,.1); border: 1px solid rgba(111,214,197,.4); }
+  .unlock b { display: block; color: var(--teal); font-size: 13px; }
+  .unlock span { color: var(--muted); font-size: 13px; }
+  @media (max-width: 640px) { .statrow, .achgrid { grid-template-columns: 1fr 1fr; } }
+  .settings { display: grid; gap: 6px; }
+  .srow { display: grid; grid-template-columns: 1fr 70px auto; align-items: center; gap: 10px; padding: 6px 10px; background: rgba(255,255,255,.04); border-radius: 10px; font-size: 13px; }
+  .srow .k { color: var(--muted); }
+  .srow .v { font-weight: 700; }
+  .srow .btn { min-width: 0; padding: 6px 12px; font-size: 12px; }
+  .srow input[type=range] { grid-column: 2 / 4; width: 100%; accent-color: var(--peach); }
+  body.zh { font-family: "Source Sans 3", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, sans-serif; }
+  body.zh h1, body.zh .modal h2, body.zh #banner { font-family: Fraunces, "Noto Serif CJK SC", "Songti SC", "SimSun", serif; }
+  #loading { position: fixed; inset: 0; z-index: 20; background: var(--bg); display: grid; place-items: center; text-align: center; }
+  #loading .t { font-family: Fraunces, Georgia, serif; font-size: 40px; color: var(--gold); }
+  #loading .bar { width: 240px; margin: 14px auto 0; }
+  #loading .bar > i { background: var(--peach); transform: scaleX(0); transition: transform .2s; }
+  #loading .s { color: var(--muted); font-size: 13px; margin-top: 10px; }
+  #about .modal p { color: var(--muted); font-size: 14px; line-height: 1.6; }
+  #about .modal p b { color: var(--ink); }
+  @media (max-width: 900px) { #status { width: 180px; } #minimap { width: 110px; height: 110px; } h1 { font-size: 56px; } #title .panel { left: 5vw; max-width: 80vw; } }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="vignette"></div>
+<div id="hurt"></div>
+<div id="flash"></div>
+
+<div id="ui">
+  <div id="status" class="hud">
+    <div class="brand">EMBERLIGHT</div>
+    <div class="hp"><span id="hpText">100 / 100</span></div>
+    <div class="bar" id="hpbar"><i></i></div>
+    <div class="bar" id="xpbar"><i></i></div>
+    <div class="row"><b id="lvlText">Level 01</b> · <span id="xpText">0 / 12 XP</span></div>
+    <div class="row shards"><span id="shardText">0 forge shards</span></div>
+    <div class="row" id="forgeText">Edge 0 / 3 · Mail 0 / 3 · Charm 0 / 3</div>
+    <div class="row" id="statText">Damage ×1.00 · Armour 0%</div>
+    <div class="row" id="bestText">Best 00:00 · 0 kills</div>
+    <button class="pill on" id="autoBtn"><b>Tab</b> Auto attack ON</button>
+  </div>
+
+  <div id="topc" class="hud">
+    <div id="timer">00:00 / 10:00</div>
+    <div id="sub">The Hearth · Threat 01 · 0 enemies</div>
+    <div id="banner"></div>
+    <div id="boss"><div class="name">THE ASH WARDEN</div><div class="bar" id="bossbar"><i></i></div></div>
+  </div>
+
+  <div id="topr" class="hud">
+    <div class="btns"><button class="pill" id="soundBtn">Sound</button><button class="pill" id="pauseBtn">Pause</button></div>
+    <canvas id="minimap" width="300" height="300"></canvas>
+  </div>
+
+  <div id="weapon" class="hud">
+    <div id="wcard"><div class="name" id="wName">EMBER CRESCENT</div><div class="keys"><b>LMB / J</b> Attack &nbsp; <b>RMB / K</b> Heavy</div></div>
+    <button class="pill" id="swapBtn"><b>Q</b> Switch weapon</button>
+  </div>
+
+  <div id="weather" class="hud">
+    <div class="label">The living valley</div>
+    <div class="btns">
+      <button class="pill" id="todBtn"><b>T</b> <span>Day</span></button>
+      <button class="pill" id="wxBtn"><b>R</b> <span>Clear</span></button>
+      <button class="pill" id="autoWxBtn"><b>Y</b> <span>Auto</span></button>
+    </div>
+  </div>
+  <button class="pill" id="forgeHint"><b>F</b> Enter forge</button>
+
+  <div id="botr" class="hud">
+    <div id="dashText"><b>SPACE</b><span class="ready">Dash ready</span></div>
+    <div id="novaText"><b>E</b><span class="ready">Ember nova ready</span></div>
+    <div class="stat" id="killText">0 defeated · 0 elites</div>
+  </div>
+  <div id="dmgLayer"></div>
+  <div id="stick"><div id="stickKnob"></div></div>
+  <div id="touchBtns">
+    <button class="tbtn" id="tHeavy">Heavy</button><button class="tbtn" id="tDash">Dash</button><button class="tbtn" id="tNova">Nova</button><button class="tbtn" id="tSwap">Swap</button><button class="tbtn" id="tForge">Forge</button>
+  </div>
+</div>
+
+<!-- title -->
+<div id="title" class="overlay show">
+  <div class="panel">
+    <div class="kicker">A little world. A brave heart.</div>
+    <h1>Emberlight.</h1>
+    <div class="lead">A wildwood without end.<br>A little light worth keeping.</div>
+    <div class="desc">Explore five districts. Collect embers.<br>Forge your build. Face the Ash Warden.<br>Survive ten minutes — then go endless.</div>
+    <button class="btn" id="startBtn">Enter the wildwood &nbsp;→</button>
+    <div class="controls">
+      <b>WASD</b> Move <span class="dot">•</span> <b>Mouse</b> Aim <span class="dot">•</span> <b>Auto attack on</b> <span class="dot">•</span> <b>Right click / K</b> Heavy<br>
+      <b>Space</b> Dash <span class="dot">•</span> <b>E</b> Ember nova <span class="dot">•</span> <b>Q</b> Swap<br>
+      <b>F</b> Forge <span class="dot">•</span> <b>Tab</b> Auto / manual <span class="dot">•</span> <b>Esc</b> Pause<br>
+      <b>Scroll</b> Zoom <span class="dot">•</span> <b>F4</b> Hide interface
+    </div>
+    <div class="tiny">Survival / Level up / Craft your build</div>
+    <div class="tiny" id="titleBest" style="color:var(--peach);letter-spacing:.08em;text-transform:none;margin-top:8px"></div>
+    <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap"><button class="btn ghost" id="archiveBtn" style="min-width:0;padding:10px 22px">Ember archive</button><button class="btn ghost" id="aboutBtn" style="min-width:0;padding:10px 22px">About</button></div>
+  </div>
+</div>
+
+<div id="about" class="overlay"><div class="center"><div class="modal">
+  <h2>About Emberlight</h2>
+  <p>A small survivors-like set in a valley that keeps its own weather. Every building, tree, ruin and creature was modelled headlessly in <b>Blender</b> from primitives and shipped as one 1.8&nbsp;MB kit; the world, the crowds and the light are assembled at runtime in <b>three.js</b>.</p>
+  <p><b>The loop.</b> Ash creatures pour in from the dark. Cut them down, collect the embers they drop, and choose a talent every level. Forge shards buy permanent upgrades at the smithy in the Hearth. At eight minutes the Ash Warden wakes. Survive ten and the dawn is yours — keep going for endless.</p>
+  <p><b>Districts.</b> The Hearth, The Wildwood, Mossfall Ruins, Cinder Barrow, Silvermere Shore. Each favours different enemies.</p>
+  <p>Inspired by 歸藏's <b>Emberlight</b> (GPT-6 Astra + Blender + Godot). This version rebuilds the idea from scratch: Blender 5.2 headless for the kit, three.js r184 for everything else, WebAudio for every sound.</p>
+  <div class="actions"><button class="btn" id="aboutClose">Back</button></div>
+</div></div></div>
+
+<div id="archive" class="overlay"><div class="center"><div class="modal" style="width:min(640px,94vw)">
+  <h2>The Ember Archive</h2>
+  <div class="sub">What the valley remembers of you. Kept on this device.</div>
+  <div id="archiveBody"></div>
+  <div class="actions"><button class="btn" id="archiveClose">Back</button></div>
+</div></div></div>
+
+<div id="levelup" class="overlay"><div class="center"><div class="modal">
+  <h2 id="luTitle">Level 02. A brighter spark.</h2>
+  <div class="sub" id="luSub">Choose a talent. Your run is paused. &nbsp;[ 1 / 2 / 3 ]</div>
+  <div id="luChoices"></div>
+</div></div></div>
+
+<div id="forge" class="overlay"><div class="center"><div class="modal">
+  <h2>The Forge</h2>
+  <div class="sub">Spend forge shards on permanent upgrades. &nbsp;<span id="forgeShards">0 shards</span></div>
+  <div id="forgeTracks"></div>
+  <div class="actions"><button class="btn ghost" id="forgeRest">Rest by the hearth — heal to full (5 shards)</button><button class="btn" id="forgeClose">Leave &nbsp;(F / Esc)</button></div>
+</div></div></div>
+
+<div id="pause" class="overlay"><div class="center"><div class="modal">
+  <h2>Paused</h2>
+  <div class="sub">The wildwood waits.</div>
+  <div class="stats" id="pauseStats"></div>
+  <div class="sub" id="settingsTitle" style="margin:16px 0 4px">Settings</div>
+  <div class="settings">
+    <div class="srow" id="setQuality"><span class="k">Quality</span><span class="v">High</span><button class="btn ghost">Toggle</button></div>
+    <div class="srow" id="setShake"><span class="k">Screen shake</span><span class="v">On</span><button class="btn ghost">Toggle</button></div>
+    <div class="srow" id="setNumbers"><span class="k">Damage numbers</span><span class="v">On</span><button class="btn ghost">Toggle</button></div>
+    <div class="srow" id="setMusic"><span class="k">Music</span><input type="range" min="0" max="100" value="56"></div>
+    <div class="srow" id="setSfx"><span class="k">Sound effects</span><input type="range" min="0" max="100" value="69"></div>
+    <div class="srow" id="setLang"><span class="k">Language / 语言</span><span class="v">English</span><button class="btn ghost">Toggle</button></div>
+  </div>
+  <div class="actions"><button class="btn" id="resumeBtn">Resume &nbsp;(Esc)</button><button class="btn ghost" id="quitBtn">Back to title</button></div>
+</div></div></div>
+
+<div id="end" class="overlay"><div class="center"><div class="modal">
+  <h2 id="endTitle">The light went out.</h2>
+  <div class="sub" id="endSub"></div>
+  <div class="stats" id="endStats"></div>
+  <div id="endUnlocks"></div>
+  <div class="actions"><button class="btn" id="endPrimary">Try again</button><button class="btn ghost" id="endSecondary">Back to title</button></div>
+</div></div></div>
+
+<div id="loading"><div><div class="t">Emberlight</div><div class="bar"><i id="loadBar"></i></div><div class="s" id="loadText">Waking the valley…</div></div></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module" src="./main.js"></script>
+</body>
+</html>
