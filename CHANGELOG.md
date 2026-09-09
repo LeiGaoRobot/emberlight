@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.7.1 — 2026-09-10 · 修复主角动画目标节点
+
+- 修复 `build_kit.py` 里 `RIG_P` 用的 `body/head` 变量已被区域精英循环(`mini_rig(4, "Maw")`)覆盖的 bug:所有 P_* 剪辑实际打在 `M4_Body/M4_Head` 上,主角身体/头部动画从会话 B 起就没在播(只有手臂在动)。现在在主角骨架建完后立即捕获 `P_RIG = (body, head, arm_l, arm_r)` 供动画段使用。验收:解析 GLB JSON 块,`P_idle` 目标节点由 `['M4_Body','M4_Head','P_ArmL','P_ArmR']` 变为 `['P_ArmL','P_ArmR','P_Body','P_Head']`;网页端 mixer 绑定五条轨全部落到 P_* 节点,开局推帧后 `P_Body` 位置/四元数与 `P_Head` 四元数随帧变化;控制台无缺轨警告。资产 URL 升到 `kit.glb?v=6`(灯下问道会话 X1 发现)
+
 ## v2.7 — 2026-09-10 · 会话 C:引导与手感(PLAN_v3)
 
 - C1 首局引导:四张卡按序出现(移动 → 自动攻击 → 拾余烬升级 → 铁匠铺按 F),完成对应动作 1.5 s 后消失,25 s 超时自动跳过;触屏/手柄有各自文案;`META.guided` 记住不再弹。验收:autopilot 新档 0 s / 1.5 s / 12.2 s / 13.8 s 依次出现,38.8 s 全部完成

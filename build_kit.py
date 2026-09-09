@@ -638,6 +638,8 @@ ball("HandR", (0, -0.12, -0.56), 0.08, M["Skin"], arm_r, sub=0)
 blade = empty("P_Blade"); blade.parent = arm_r; blade.location = (0, -0.15, -0.58)
 cyl("Hilt", (0, 0, 0), 0.03, 0.3, M["Belt"], blade, verts=6, rot=(math.pi / 2, 0, 0))
 arc("HotMetal_Crescent", (0, -0.35, 0), 0.32, 0.5, math.radians(200), math.radians(340), 0.03, M["HotMetal"], blade)
+# Capture the player empties now: the elite loops below reuse the names body/head/P.
+P_RIG = (body, head, arm_l, arm_r)
 
 # ---------------------------------------------------------------- enemies (Z up; front = -Y)
 def eyes(P, y, z, sep=0.12, r=0.05):
@@ -822,7 +824,7 @@ for emp, sx in ((al, -1), (ar, 1)):
 # ---------------------------------------------------------------- animations (keyframes on the rig empties, one NLA track per clip)
 # Every clip starts from the rest pose at frame 0 so the web side can play the one-shots additively.
 scene.render.fps = 24
-RIG_P = {"body": body, "head": head, "armL": arm_l, "armR": arm_r}
+RIG_P = {"body": P_RIG[0], "head": P_RIG[1], "armL": P_RIG[2], "armR": P_RIG[3]}
 RIG_W = {"body": wb, "head": wh, "armL": wl, "armR": wr}
 
 def _rest(objs):
