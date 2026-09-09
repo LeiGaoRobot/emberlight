@@ -78,6 +78,27 @@
   #weather .btns { display: flex; gap: 8px; justify-content: center; }
   #forgeHint { position: absolute; left: 50%; bottom: 84px; transform: translateX(-50%); display: none; }
   #forgeHint.show { display: inline-flex; }
+  #shrineHint { position: absolute; left: 50%; bottom: 84px; transform: translateX(-50%); display: none; }
+  #shrineHint.show { display: inline-flex; }
+  #shrine { margin-top: 10px; width: 300px; display: none; }
+  #shrine.show { display: block; }
+  #shrine .name { font-size: 12px; letter-spacing: .18em; color: var(--teal); font-weight: 700; }
+  #mini { margin-top: 8px; width: 300px; display: none; } #mini.show { display: block; }
+  #mini .name { font-size: 11px; letter-spacing: .18em; color: #c48aff; font-weight: 700; }
+  #minibar { height: 6px; margin-top: 4px; } #minibar > i { background: linear-gradient(90deg, #8a5cff, #c48aff); }
+  .bestiary { display: flex; gap: 8px; flex-wrap: wrap; }
+  .bb { font-size: 12px; padding: 5px 10px; border-radius: 10px; border: 1px solid var(--line); color: var(--muted); }
+  .bb.on { color: #d9b8ff; border-color: rgba(196,138,255,.5); background: rgba(196,138,255,.08); }
+  #shrineBar { height: 7px; margin-top: 4px; } #shrineBar > i { background: linear-gradient(90deg, #6fd6c5, #ffd08a); }
+  .pickrow { display: flex; align-items: center; gap: 12px; margin: 0 0 8px; }
+  .plabel { font-size: 11px; letter-spacing: .2em; color: var(--muted); text-transform: uppercase; min-width: 88px; }
+  .picks { display: flex; gap: 6px; flex-wrap: wrap; }
+  .dp { pointer-events: auto; background: var(--panel); border: 1px solid var(--line); color: var(--muted); border-radius: 10px; padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+  .dp.on { color: var(--ink); border-color: rgba(247,195,154,.6); background: rgba(247,195,154,.14); }
+  .pdesc { color: var(--muted); font-size: 12px; margin: -2px 0 12px 100px; min-height: 16px; }
+  .dbadges { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .dbadge { font-size: 12px; color: var(--muted); background: rgba(255,255,255,.04); border-radius: 10px; padding: 6px 10px; }
+  .dbadge b { color: var(--peach); margin-right: 6px; }
   /* ---------- bottom-right ---------- */
   #botr { right: 18px; bottom: 18px; text-align: right; font-size: 13px; text-shadow: 0 2px 6px rgba(0,0,0,.6); }
   #botr div { margin-top: 4px; }
@@ -116,6 +137,10 @@
   .choice .t small { color: var(--muted); font-weight: 500; margin-left: 8px; }
   .choice .d { color: var(--muted); font-size: 13px; margin-top: 3px; }
   .choice.disabled { opacity: .45; cursor: default; }
+  .choice.rare { border-color: rgba(111,214,197,.45); }
+  .choice.keystone { border-color: rgba(233,196,106,.7); background: rgba(233,196,106,.07); }
+  .choice .t em { font-style: normal; font-size: 10px; letter-spacing: .14em; text-transform: uppercase; margin-left: 10px; color: var(--teal); }
+  .choice.keystone .t em { color: var(--gold); }
   .modal .actions { display: flex; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
   .modal .actions .btn { min-width: 0; padding: 10px 18px; font-size: 14px; }
   .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; margin: 14px 0 6px; font-size: 14px; }
@@ -187,7 +212,7 @@
     #touchBtns { bottom: 44px; right: 8px; gap: 6px; flex-direction: row; flex-wrap: wrap; width: 132px; justify-content: flex-end; }
     .tbtn { width: 50px; height: 50px; font-size: 10px; }
     #title .panel { transform: none; top: 8px; max-width: 70vw; } h1 { font-size: 34px; margin: 4px 0 6px; } .lead { font-size: 14px; } .desc { font-size: 12px; margin: 6px 0 10px; }
-    #title .controls, #title .tiny { display: none; } .btn { padding: 9px 16px; font-size: 13px; min-width: 0; }
+    #title .controls, #title .tiny, .pdesc { display: none; } .pickrow { margin-bottom: 4px; } .btn { padding: 9px 16px; font-size: 13px; min-width: 0; }
     .modal { padding: 14px 16px; max-height: 92vh; overflow-y: auto; } .modal h2 { font-size: 20px; margin-bottom: 2px; } .choice { padding: 8px 12px; margin-top: 6px; }
   }
   /* phone portrait */
@@ -197,7 +222,7 @@
     #minimap { width: 84px; height: 84px; } #topr .pill { padding: 4px 9px; font-size: 11px; }
     #weather .pill { padding: 5px 9px; font-size: 11px; } #botr { font-size: 11px; }
     h1 { font-size: 44px; } #title .panel { left: 5vw; right: 5vw; max-width: none; } .btn { min-width: 0; width: 100%; }
-    #title .controls { display: none; }
+    #title .controls, .pdesc { display: none; } .plabel { min-width: 0; }
   }
 </style>
 </head>
@@ -226,6 +251,8 @@
     <div id="sub">The Hearth · Threat 01 · 0 enemies</div>
     <div id="banner"></div>
     <div id="boss"><div class="name">THE ASH WARDEN</div><div class="bar" id="bossbar"><i></i></div></div>
+  <div id="shrine"><div class="name">SHRINE</div><div class="bar" id="shrineBar"><i></i></div></div>
+  <div id="mini"><div class="name">ELITE</div><div class="bar" id="minibar"><i></i></div></div>
   </div>
 
   <div id="topr" class="hud">
@@ -247,6 +274,7 @@
     </div>
   </div>
   <button class="pill" id="forgeHint"><b>F</b> Enter forge</button>
+  <button class="pill" id="shrineHint"><b>F</b> Light the shrine</button>
 
   <div id="botr" class="hud">
     <div id="dashText"><b>SPACE</b><span class="ready">Dash ready</span></div>
@@ -268,6 +296,9 @@
     <h1>Emberlight.</h1>
     <div class="lead">A wildwood without end.<br>A little light worth keeping.</div>
     <div class="desc">Explore five districts. Collect embers.<br>Forge your build. Face the Ash Warden.<br>Survive ten minutes — then go endless.</div>
+    <div class="pickrow"><span class="plabel" id="diffLabel">Difficulty</span><div class="picks" id="diffPick"><button class="dp" data-d="calm"><span class="n">Calm</span></button><button class="dp on" data-d="standard"><span class="n">Standard</span></button><button class="dp" data-d="ash"><span class="n">Ash</span></button></div></div>
+    <div class="pdesc" id="diffDesc"></div>
+    <div class="pickrow" id="weaponRow"><span class="plabel" id="weaponLabel">Starting weapon</span><div class="picks" id="weaponPick" style="display:none"></div></div>
     <button class="btn" id="startBtn">Enter the wildwood &nbsp;→</button>
     <div class="controls">
       <b>WASD</b> Move <span class="dot">•</span> <b>Mouse</b> Aim <span class="dot">•</span> <b>Auto attack on</b> <span class="dot">•</span> <b>Right click / K</b> Heavy<br>

@@ -8,8 +8,8 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
-import { Kit, DynSet, buildGround, generateMap, districtAt, DISTRICTS, ROADS, ISLAND_R, PLAY_R, collideStatic, Grid, setGlow, MATS, treeUniforms, mulberry32, vnoise } from './world.js?v=19';
-import * as AUDIO from './audio.js?v=19';
+import { Kit, DynSet, buildGround, generateMap, districtAt, DISTRICTS, ROADS, ISLAND_R, PLAY_R, collideStatic, Grid, setGlow, MATS, treeUniforms, mulberry32, vnoise } from './world.js?v=26';
+import * as AUDIO from './audio.js?v=26';
 
 const $ = (s) => document.querySelector(s);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -17,7 +17,13 @@ const lerp = (a, b, t) => a + (b - a) * t;
 const fmtTime = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 const pad2 = (n) => String(n).padStart(2, '0');
 const RUN_LENGTH = 600;      // 10 minutes
-const BOSS_AT = 480;         // 8 minutes
+const DIFFS = {
+  calm:     { name: 'Calm',     zh: '静谧', dmg: 0.7,  spawn: 0.8,  hp: 0.9,  speed: 0.95, elite: 1.3, bossAt: 480, phase2: false, desc: 'Enemies hit 30% softer, the Warden never rages.', zhDesc: '敌人伤害 −30%,守卫没有二阶段。' },
+  standard: { name: 'Standard', zh: '标准', dmg: 1.0,  spawn: 1.0,  hp: 1.0,  speed: 1.0,  elite: 1.0, bossAt: 480, phase2: true,  desc: 'The valley as intended. Warden at eight minutes.', zhDesc: '标准体验,守卫八分钟登场。' },
+  ash:      { name: 'Ash',      zh: '灰烬', dmg: 1.5,  spawn: 1.8,  hp: 1.3,  speed: 1.15, elite: 0.6, bossAt: 360, phase2: true,  desc: '80% more creatures, faster and 50% harder hits, Warden at six.', zhDesc: '刷怪 +80%、更快、伤害 +50%,守卫六分钟登场。' },
+};
+const DIFF = () => DIFFS[SET.difficulty] || DIFFS.standard;
+const BOSS_AT_FN = () => DIFF().bossAt;
 
 // =====================================================================
 // renderer / scene / camera
@@ -117,6 +123,8 @@ const WEAPONS = [
   { key: 'crescent', name: 'EMBER CRESCENT', rate: 0.55, dmg: 15, range: 3.0, arc: 2.3, type: 'melee' },
   { key: 'bolt', name: 'CINDER BOLT', rate: 0.34, dmg: 8, range: 17, type: 'ranged', speed: 24, pierce: 1 },
   { key: 'lantern', name: 'ASH LANTERNS', rate: 0.5, dmg: 9, radius: 2.7, type: 'orbit', count: 2 },
+  { key: 'bow', name: 'ASH LONGBOW', rate: 0.95, dmg: 26, range: 24, type: 'ranged', speed: 34, pierce: 3, heavyBolt: true },
+  { key: 'chain', name: 'EMBER CHAIN', rate: 0.2, dmg: 6.5, range: 2.1, arc: 1.25, type: 'melee' },
 ];
 const ETYPES = {
   wisp:    { hp: 14,  dmg: 4,  speed: 6.0, r: 0.35, xp: 1, kit: 'Wisp',    shards: 0.12, mass: 0.6 },
@@ -140,12 +148,28 @@ const TALENTS = [
   { key: 'lucky', name: 'Lucky spark', max: 3, desc: 'Enemies drop 40% more forge shards.', apply: (p) => { p.luck *= 1.4; } },
   { key: 'bearer', name: 'Lantern bearer', max: 2, desc: 'One more orbiting ash lantern.', apply: (p) => { p.extraOrbs += 1; } },
   { key: 'spite', name: 'Spite', max: 3, desc: 'Heavy strikes deal 30% more and stun longer.', apply: (p) => { p.heavyMult *= 1.3; } },
+  { key: 'steady', name: 'Steady hand', max: 3, rare: true, desc: 'Critical chance +8%.', apply: (p) => { p.critBonus = (p.critBonus || 0) + 0.08; } },
+  { key: 'shell', name: 'Ember shell', max: 2, rare: true, desc: 'Taking a hit scorches everything within 3 for 10 damage.', apply: (p) => { p.shell = (p.shell || 0) + 1; } },
+  { key: 'kindling', name: 'Kindling', max: 3, desc: 'Kills have a 12% chance to drop an extra ember.', apply: (p) => { p.kindling = (p.kindling || 0) + 0.12; } },
+  { key: 'stride', name: 'Long stride', max: 2, desc: 'Dash carries you 30% further.', apply: (p) => { p.dashLen = (p.dashLen || 1) * 1.3; } },
+  { key: 'will', name: 'Iron will', max: 2, desc: 'Invulnerability after a hit lasts 0.2 s longer.', apply: (p) => { p.invBonus = (p.invBonus || 0) + 0.2; } },
+  { key: 'scavenger', name: 'Scavenger', max: 2, desc: 'Hearts drop twice as often.', apply: (p) => { p.heartMult = (p.heartMult || 1) * 2; } },
+  { key: 'overcharge', name: 'Overcharge', max: 3, desc: 'Heavy strike recovers 20% faster.', apply: (p) => { p.heavyCdMult = (p.heavyCdMult || 1) * 0.8; } },
+  { key: 'tongue', name: 'Cinder tongue', max: 3, desc: 'Cinder bolts deal 20% more.', apply: (p) => { p.boltMult = (p.boltMult || 1) * 1.2; } },
+  { key: 'pyre', name: 'Pyre', max: 2, rare: true, desc: 'Burning ground deals double and lasts 50% longer.', apply: (p) => { p.burnMult = (p.burnMult || 1) * 2; p.burnDur = (p.burnDur || 1) * 1.5; } },
+  { key: 'mask', name: 'Ash mask', max: 2, desc: 'Brutes and the Warden hurt you 25% less.', apply: (p) => { p.eliteRes = Math.min(0.6, (p.eliteRes || 0) + 0.25); } },
+  // keystones: one per run
+  { key: 'glass', name: 'Glass cannon', max: 1, keystone: true, desc: 'Damage +60%. Max health −40%.', apply: (p) => { p.keystone = 'glass'; p.dmgTalent *= 1.6; p.maxHp = Math.max(30, Math.round(p.maxHp * 0.6)); p.hp = Math.min(p.hp, p.maxHp); } },
+  { key: 'wardenk', name: 'Lantern warden', max: 1, keystone: true, desc: 'Two ash lanterns always orbit you, whatever you wield. Damage −10%.', apply: (p) => { p.keystone = 'wardenk'; p.orbAlways = true; p.dmgTalent *= 0.9; } },
+  { key: 'leech', name: 'Ash leech', max: 1, keystone: true, desc: 'Heal 5% of all damage dealt. Regeneration stops; hearts heal half.', apply: (p) => { p.keystone = 'leech'; p.leech = 0.05; p.noRegen = true; } },
 ];
 const LEVEL_NAMES = ['A brighter spark.', 'The wick catches.', 'Warmth returns.', 'Steady flame.', 'The dark recedes.', 'Ember heart.', 'Wildfire.', 'Beacon.', 'Sunrise in your hands.', 'Unquenchable.'];
 const WEAPON_UPGRADES = {
   crescent: { costs: [12, 24, 40], ranks: ['Wider arc (+25%)', 'Return swing: a second, reversed cut', 'Every hit restores 1 health'] },
   bolt:     { costs: [12, 24, 40], ranks: ['Pierce one more enemy', 'Fire one more bolt', 'Bolts burst on impact'] },
   lantern:  { costs: [12, 24, 40], ranks: ['One more lantern', 'Orbit radius +30%', 'Lanterns scorch the ground'] },
+  bow:      { costs: [12, 24, 40], ranks: ['Pierce two more enemies', 'Arrows split into three', 'Arrows scorch where they land'] },
+  chain:    { costs: [12, 24, 40], ranks: ['Every third hit strikes for 2.5×', 'Reach +40%', 'Hits drag enemies toward you'] },
 };
 const FORGE = [
   { key: 'edge', name: 'EDGE', desc: 'Damage <b>+20%</b> per rank', costs: [10, 20, 35] },
@@ -162,7 +186,7 @@ const S = {
   t: 0, endless: false, seed: 7,
   keys: {}, mouse: { x: 0, y: 0, down: false, rdown: false }, aim: new THREE.Vector3(),
   enemies: [], pickups: [], projectiles: [], eprojectiles: [], burns: [], slashes: [], timers: [],
-  spawnBudget: 0, eliteTimer: 40, hitStop: 0, bossIntro: 0, slowMo: 0, bossSpawned: false, boss: null,
+  spawnBudget: 0, eliteTimer: 40, hitStop: 0, bossIntro: 0, slowMo: 0, minis: [], miniDone: {}, miniCorpses: [], bossSpawned: false, boss: null,
   discovered: new Set(), district: DISTRICTS[0], lastDistrict: null, bannerT: 0,
   stats: { kills: 0, elites: 0, dmgDealt: 0 }, dmgLog: {},
   best: (() => { try { return JSON.parse(localStorage.getItem('emberlight.best') || '{"time":0,"kills":0}'); } catch (e) { return { time: 0, kills: 0 }; } })(),
@@ -172,7 +196,7 @@ function newPlayer() {
   return {
     x: 0, z: 5, vx: 0, vz: 0, r: 0.45, facing: 0, moving: 0, bob: 0,
     hp: 100, maxHp: 100, level: 1, xp: 0, xpNext: 12, shards: 0,
-    weapon: 0, weaponRank: { crescent: 0, bolt: 0, lantern: 0 }, attackT: 0, heavyCd: 0, dashCd: 0, dashT: 0, dashDx: 0, dashDz: 0, novaCd: 0, invuln: 0, swing: 0,
+    weapon: 0, weaponRank: { crescent: 0, bolt: 0, lantern: 0, bow: 0, chain: 0 }, attackT: 0, combo: 0, heavyCd: 0, dashCd: 0, dashT: 0, dashDx: 0, dashDz: 0, novaCd: 0, invuln: 0, swing: 0,
     speedMult: 1, dmgTalent: 1, speedTalent: 1, areaMult: 1, pickupMult: 1, regen: 0, armourTalent: 0, extraBolts: 0, novaCdMult: 1, luck: 1, extraOrbs: 0, heavyMult: 1, fireTrail: false,
     talents: {}, forge: { edge: 0, mail: 0, charm: 0 }, orbitA: 0, orbHits: new WeakMap(), auto: true, trailT: 0, hitFlash: 0,
   };
@@ -183,13 +207,15 @@ let P = newPlayer();
 // settings (persisted) + translations
 // =====================================================================
 const SET_V = 1, META_V = 1;
-const SET = Object.assign({ v: SET_V, quality: 'high', shake: true, numbers: true, music: 0.28, sfx: 0.55, lang: 'en' }, (() => {
+const SET = Object.assign({ v: SET_V, quality: 'high', shake: true, numbers: true, music: 0.28, sfx: 0.55, lang: 'en', difficulty: 'standard', startWeapon: 0 }, (() => {
   try {
     const raw = JSON.parse(localStorage.getItem('emberlight.settings') || '{}');
     if (typeof raw !== 'object' || raw === null) return {};
     // migrations by version: v0 (no field) → v1: clamp volumes, drop unknown keys
     const out = {};
-    for (const k of ['quality', 'shake', 'numbers', 'music', 'sfx', 'lang']) if (k in raw) out[k] = raw[k];
+    for (const k of ['quality', 'shake', 'numbers', 'music', 'sfx', 'lang', 'difficulty', 'startWeapon']) if (k in raw) out[k] = raw[k];
+    if (!['calm', 'standard', 'ash'].includes(out.difficulty)) delete out.difficulty;
+    if (!Number.isInteger(out.startWeapon)) delete out.startWeapon;
     if (typeof out.music === 'number') out.music = Math.min(0.5, Math.max(0, out.music)); else delete out.music;
     if (typeof out.sfx === 'number') out.sfx = Math.min(0.8, Math.max(0, out.sfx)); else delete out.sfx;
     if (out.quality !== 'high' && out.quality !== 'low') delete out.quality;
@@ -227,7 +253,23 @@ const ZH = {
   'Ten minutes, and the valley is still here. Keep going — it only gets wilder.': '十分钟过去,山谷还在。继续吧 —— 只会更狂野。',
   'You kept the light for': '你守住灯火', 'Go endless  →': '进入无尽  →', 'Try again': '再来一局', 'Back to title': '返回标题',
   'Time survived': '存活时间', 'Defeated': '击败', 'Elites': '精英', 'Damage dealt': '造成伤害', 'Forge shards': '锻造币',
-  'Rested': '休整完毕', 'Unlocked': '解锁',
+  'Rested': '休整完毕', 'Unlocked': '解锁', 'Shrines lit': '点亮神龛', ' shrines': ' 座神龛', 'dawns': '次通关',
+  'Hold the shrine for 45 seconds.': '守住神龛 45 秒。', 'THE SHRINE GUTTERS OUT  ·  You strayed too far.': '神龛熄灭了  ·  你走得太远。', 'WARD GAINED': '获得守护', 'SHRINE': '神龛', '· too far!': '· 太远了!',
+  'Wolfsbane': '狼毒', 'Wisps no longer hunt in packs and hit for half.': '鬼火不再成群,伤害减半。', 'Stonewatch': '石守', 'Your attacks shatter spitter bolts; the rest sting 30% less.': '你的攻击能击碎吐火弹,余下伤害 −30%。',
+  'Ashwalker': '踏灰者', 'Burning ground cannot hurt you; +25% damage to cinders and brutes.': '燃烧地面对你无害;对灰烬与蛮兽伤害 +25%。', 'Tidewalker': '踏潮者', 'Move 12% faster and dash recovers 25% sooner.': '移速 +12%,冲刺冷却 −25%。',
+  'Light the shrine': '点亮神龛', 'Difficulty': '难度', 'Starting weapon': '起手武器',
+  'THE WOLF KING': '狼王', 'THE STONE SENTINEL': '石像哨卫', 'THE CINDER SALAMANDER': '余烬火蜥', 'THE SILVERMERE MAW': '银泽巨口', 'wakes': '苏醒', 'falls': '倒下', 'FIRST KILL': '首次击杀', 'Bestiary': '图鉴', 'Elites felled': '击杀精英',
+  'ASH LONGBOW': '灰烬长弓', 'EMBER CHAIN': '余烬链', 'LONGBOW': '长弓', 'CHAIN': '余烬链',
+  'Pierce two more enemies': '多穿透两个敌人', 'Arrows split into three': '箭分三支', 'Arrows scorch where they land': '落点灼烧地面',
+  'Every third hit strikes for 2.5×': '每第三击造成 2.5 倍伤害', 'Reach +40%': '攻击距离 +40%', 'Hits drag enemies toward you': '命中把敌人拖向你',
+  'Keystone': '钥石', 'Rare': '稀有',
+  'Steady hand': '稳手', 'Critical chance +8%.': '暴击率 +8%。', 'Ember shell': '余烬甲壳', 'Taking a hit scorches everything within 3 for 10 damage.': '受击时灼烧周围 3 格内所有敌人 10 点。',
+  'Kindling': '引火物', 'Kills have a 12% chance to drop an extra ember.': '击杀有 12% 几率额外掉一枚余烬。', 'Long stride': '大步', 'Dash carries you 30% further.': '冲刺距离 +30%。',
+  'Iron will': '铁意志', 'Invulnerability after a hit lasts 0.2 s longer.': '受击后无敌延长 0.2 秒。', 'Scavenger': '拾荒者', 'Hearts drop twice as often.': '红心掉率翻倍。',
+  'Overcharge': '过载', 'Heavy strike recovers 20% faster.': '重击冷却 −20%。', 'Cinder tongue': '余烬之舌', 'Cinder bolts deal 20% more.': '余烬弹伤害 +20%。',
+  'Pyre': '柴堆', 'Burning ground deals double and lasts 50% longer.': '燃烧地面伤害翻倍、持续 +50%。', 'Ash mask': '灰烬面具', 'Brutes and the Warden hurt you 25% less.': '蛮兽与守卫对你的伤害 −25%。',
+  'Glass cannon': '玻璃大炮', 'Damage +60%. Max health −40%.': '伤害 +60%,最大生命 −40%。', 'Lantern warden': '提灯守护', 'Two ash lanterns always orbit you, whatever you wield. Damage −10%.': '无论持何武器,两盏提灯常驻环绕。伤害 −10%。',
+  'Ash leech': '灰烬吸血', 'Heal 5% of all damage dealt. Regeneration stops; hearts heal half.': '造成伤害的 5% 转为生命。再生失效,红心回复减半。',
   // level names
   'A brighter spark.': '更亮的火星。', 'The wick catches.': '灯芯点燃。', 'Warmth returns.': '暖意回归。', 'Steady flame.': '稳定的火焰。', 'The dark recedes.': '黑暗退去。',
   'Ember heart.': '余烬之心。', 'Wildfire.': '野火。', 'Beacon.': '灯塔。', 'Sunrise in your hands.': '手中的日出。', 'Unquenchable.': '不灭。',
@@ -269,7 +311,7 @@ const HTML_ZH = {
   '#pause h2': '已暂停', '#pause .modal > .sub': '荒野在等你。', '#resumeBtn': '继续 &nbsp;(Esc)', '#quitBtn': '返回标题', '#diagBtn': '复制诊断信息',
   '#endSecondary': '返回标题',
   '#weather .label': '活着的山谷', '#swapBtn': '<b>Q</b> 切换武器', '#forgeHint': '<b>F</b> 进入铁匠铺', '#pauseBtn': '暂停',
-  '#dashText b': '空格', '#settingsTitle': '设置', '#setQuality .k': '画质', '#setShake .k': '屏幕抖动', '#setNumbers .k': '伤害数字', '#setMusic .k': '音乐', '#setSfx .k': '音效', '#setLang .k': '语言 / Language',
+  '#dashText b': '空格', '#settingsTitle': '设置', '#diffLabel': '难度', '#weaponLabel': '起手武器', '#shrineHint': '<b>F</b> 点亮神龛', '#setQuality .k': '画质', '#setShake .k': '屏幕抖动', '#setNumbers .k': '伤害数字', '#setMusic .k': '音乐', '#setSfx .k': '音效', '#setLang .k': '语言 / Language',
   '#about h2': '关于 Emberlight',
 };
 const HTML_EN = {};
@@ -281,7 +323,7 @@ function applyLang() {
     if (!(sel in HTML_EN)) HTML_EN[sel] = el.innerHTML;
     el.innerHTML = SET.lang === 'zh' ? HTML_ZH[sel] : HTML_EN[sel];
   }
-  refreshWeatherButtons(); refreshAutoBtn(); refreshWeaponCard(); refreshTitleBest(); renderSettings();
+  refreshWeatherButtons(); refreshAutoBtn(); refreshWeaponCard(); refreshTitleBest(); renderSettings(); renderDiffPick();
   $('#soundBtn').textContent = AUDIO.audioEnabled() ? tr('Sound') : tr('Sound off');
   if (S.modal === 'forge') renderForge();
   if ($('#archive').classList.contains('show')) renderArchive();
@@ -316,14 +358,16 @@ const UNLOCKS = [
   { key: 'boltstart', name: 'Cinder in the hand', how: 'Defeat 3000 creatures in total', gives: 'Runs start with the Cinder Bolt, already forged once', test: (m) => m.totalKills >= 3000 },
 ];
 function loadMeta() {
-  const fresh = { v: META_V, totalKills: 0, bossKills: 0, runsPlayed: 0, bestTime: 0, runs: [], unlocks: {} };
+  const fresh = { v: META_V, totalKills: 0, bossKills: 0, runsPlayed: 0, bestTime: 0, runs: [], unlocks: {}, byDiff: {}, bestiary: {} };
   try {
     const m = JSON.parse(localStorage.getItem('emberlight.meta') || 'null');
     if (!m || typeof m !== 'object') return fresh;
     // migrate: fill missing fields, coerce types, keep only well-formed runs, unknown unlock keys dropped
     const out = Object.assign({}, fresh);
     for (const k of ['totalKills', 'bossKills', 'runsPlayed', 'bestTime']) out[k] = Number.isFinite(m[k]) ? Math.max(0, Math.floor(m[k])) : 0;
-    out.runs = Array.isArray(m.runs) ? m.runs.filter((r) => r && Number.isFinite(r.time)).map((r) => ({ time: Math.floor(r.time), kills: r.kills | 0, level: r.level | 0, won: !!r.won, boss: !!r.boss, date: String(r.date || '') })).slice(0, 5) : [];
+    out.runs = Array.isArray(m.runs) ? m.runs.filter((r) => r && Number.isFinite(r.time)).map((r) => ({ time: Math.floor(r.time), kills: r.kills | 0, level: r.level | 0, won: !!r.won, boss: !!r.boss, date: String(r.date || ''), diff: ['calm', 'standard', 'ash'].includes(r.diff) ? r.diff : 'standard', shrines: r.shrines | 0 })).slice(0, 5) : [];
+    out.bestiary = {}; if (m.bestiary && typeof m.bestiary === 'object') for (const k of ['wolfking', 'sentinel', 'salamander', 'maw']) if (m.bestiary[k]) out.bestiary[k] = String(m.bestiary[k]);
+    out.byDiff = {}; if (m.byDiff && typeof m.byDiff === 'object') for (const k of ['calm', 'standard', 'ash']) if (m.byDiff[k]) out.byDiff[k] = { best: m.byDiff[k].best | 0, wins: m.byDiff[k].wins | 0, runs: m.byDiff[k].runs | 0 };
     out.unlocks = {};
     if (m.unlocks && typeof m.unlocks === 'object') for (const u of UNLOCKS) if (m.unlocks[u.key]) out.unlocks[u.key] = m.unlocks[u.key];
     out.v = META_V;
@@ -335,7 +379,9 @@ const META = loadMeta();
 function saveMeta() { try { localStorage.setItem('emberlight.meta', JSON.stringify(META)); } catch (e) { window.__emberLog('save', 'meta write failed: ' + e.message); } }
 const unlocked = (k) => !!META.unlocks[k];
 function recordRun(won) {
-  const run = { time: Math.floor(S.t), kills: S.stats.kills, level: P.level, won, boss: !!S.bossKilled, date: new Date().toISOString().slice(0, 10) };
+  const run = { time: Math.floor(S.t), kills: S.stats.kills, level: P.level, won, boss: !!S.bossKilled, date: new Date().toISOString().slice(0, 10), diff: SET.difficulty, shrines: S.shrines ? Object.values(S.shrines).filter((x) => x.state === 'done').length : 0 };
+  META.byDiff = META.byDiff || {}; const bd = META.byDiff[SET.difficulty] || (META.byDiff[SET.difficulty] = { best: 0, wins: 0, runs: 0 });
+  bd.runs++; bd.best = Math.max(bd.best, run.time); if (won) bd.wins++;
   META.totalKills += S.stats.kills; META.runsPlayed++; if (S.bossKilled) META.bossKills++;
   META.bestTime = Math.max(META.bestTime, run.time);
   META.runs.push(run); META.runs.sort((a, b) => b.time - a.time || b.kills - a.kills); META.runs = META.runs.slice(0, 5);
@@ -349,8 +395,12 @@ function renderArchive() {
   const stat = (v, l) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`;
   let h = `<div class="statrow">${stat(fmtTime(META.bestTime), tr('longest run'))}${stat(META.totalKills, tr('creatures defeated'))}${stat(META.bossKills, tr('wardens felled'))}${stat(META.runsPlayed, tr('runs'))}</div>`;
   h += '<div class="achgrid">' + UNLOCKS.map((u) => `<div class="ach ${unlocked(u.key) ? 'on' : ''}"><div class="t">${tr(u.name)}</div><div class="d">${tr(u.how)}</div><div class="g">${unlocked(u.key) ? tr(u.gives) : tr('Locked')}</div></div>`).join('') + '</div>';
+  const best = META.bestiary || {};
+  h += `<div class="sub" style="margin:16px 0 6px">${tr('Bestiary')}</div><div class="bestiary">` + Object.keys(MINIS).map((k) => { const d = MINIS[k]; const on = !!best[d.key]; return `<span class="bb ${on ? 'on' : ''}">${on ? tr(d.name) : '???'}</span>`; }).join('') + `<span class="bb ${META.bossKills ? 'on' : ''}">${META.bossKills ? tr('THE ASH WARDEN') : '???'}</span></div>`;
   h += `<div class="sub" style="margin:16px 0 6px">${tr('Best runs')}</div>`;
-  h += META.runs.length ? '<table class="runs">' + META.runs.map((r) => `<tr><td>${fmtTime(r.time)}</td><td>${r.kills} ${tr('defeated')}</td><td>${tr('Level')} ${r.level}</td><td>${r.won ? tr('Dawn') : (r.boss ? tr('Warden slain') : '—')}</td><td>${r.date}</td></tr>`).join('') + '</table>' : `<div class="sub">${tr('No runs yet.')}</div>`;
+  h += META.runs.length ? '<table class="runs">' + META.runs.map((r) => `<tr><td>${fmtTime(r.time)}</td><td>${SET.lang === 'zh' ? DIFFS[r.diff || 'standard'].zh : DIFFS[r.diff || 'standard'].name}</td><td>${r.kills} ${tr('defeated')}</td><td>${tr('Level')} ${r.level}</td><td>${r.won ? tr('Dawn') : (r.boss ? tr('Warden slain') : '—')}${r.shrines ? ` · ${r.shrines}${tr(' shrines')}` : ''}</td><td>${r.date}</td></tr>`).join('') + '</table>' : `<div class="sub">${tr('No runs yet.')}</div>`;
+  const bdRows = ['calm', 'standard', 'ash'].map((k) => { const b = (META.byDiff || {})[k]; return b ? `<span class="dbadge"><b>${SET.lang === 'zh' ? DIFFS[k].zh : DIFFS[k].name}</b> ${fmtTime(b.best)} · ${b.wins}/${b.runs} ${tr('dawns')}</span>` : ''; }).join('');
+  if (bdRows) h += `<div class="dbadges">${bdRows}</div>`;
   box.innerHTML = h;
 }
 const dmgMult = () => P.dmgTalent * (1 + 0.2 * P.forge.edge);
@@ -366,7 +416,7 @@ const threat = () => Math.floor(minute()) + 1;
 const kit = new Kit();
 let world, ground, playerRig, wardenRig, enemySets = {}, pickupSets = {}, boltSet, spitSet;
 const loadBar = $('#loadBar'), loadText = $('#loadText');
-kit.load('./assets/kit.glb?v=4', (e) => { if (e.total) loadBar.style.transform = `scaleX(${(e.loaded / e.total) * 0.6})`; }).then(() => {
+kit.load('./assets/kit.glb?v=5', (e) => { if (e.total) loadBar.style.transform = `scaleX(${(e.loaded / e.total) * 0.6})`; }).then(() => {
   loadText.textContent = 'Planting the wildwood…';
   setTimeout(() => { const t0 = performance.now(); buildWorld(); console.log('world built in', Math.round(performance.now() - t0), 'ms'); }, 30);
 }).catch((err) => { loadText.textContent = 'Failed to load kit: ' + err.message; console.error(err); });
@@ -384,6 +434,7 @@ function buildWorld() {
   wardenRig.visible = false;
   scene.add(wardenRig);
   ANIM.p = makeRigAnimator(playerRig, 'P_');
+  buildMiniRigs();
   ANIM.w = makeRigAnimator(wardenRig, 'W_');
   // dynamic sets
   for (const k of Object.keys(ETYPES)) enemySets[k] = new DynSet(kit, ETYPES[k].kit, k === 'brute' ? 40 : 320, scene, { glowKey: 'EnemyGlow', outline: 1.07 });
@@ -792,7 +843,7 @@ function onAction(a) {
     case 'dash': tryDash(); break;
     case 'nova': tryNova(); break;
     case 'swap': P.weapon = (P.weapon + 1) % WEAPONS.length; P.attackT = Math.min(P.attackT, 0.2); refreshWeaponCard(); AUDIO.sfx('ui'); break;
-    case 'forge': if (nearForge()) openForge(); break;
+    case 'forge': if (nearForge()) openForge(); else lightShrine(nearShrine()); break;
     case 'heavy': tryHeavy(); break;
     case 'auto': P.auto = !P.auto; refreshAutoBtn(); AUDIO.sfx('ui'); break;
     case 'pause': togglePause(); break;
@@ -866,6 +917,19 @@ function updateAim() {
 // UI wiring
 // =====================================================================
 $('#startBtn').addEventListener('click', () => { AUDIO.ensureAudio(); AUDIO.resume(); startRun(); });
+for (const b of document.querySelectorAll('#diffPick .dp')) b.addEventListener('click', () => { SET.difficulty = b.dataset.d; saveSettings(); renderDiffPick(); AUDIO.sfx('ui'); });
+function renderDiffPick() {
+  for (const b of document.querySelectorAll('#diffPick .dp')) { const d = DIFFS[b.dataset.d]; b.classList.toggle('on', SET.difficulty === b.dataset.d); b.querySelector('.n').textContent = SET.lang === 'zh' ? d.zh : d.name; }
+  const d = DIFF(); $('#diffDesc').textContent = SET.lang === 'zh' ? d.zhDesc : d.desc;
+  renderWeaponPick();
+}
+function renderWeaponPick() {
+  const box = $('#weaponPick'); if (!box) return;
+  const unlockedAll = unlocked('boltstart');
+  box.style.display = unlockedAll ? 'flex' : 'none'; const row = $('#weaponRow'); if (row) row.style.display = unlockedAll ? 'flex' : 'none';
+  box.innerHTML = '';
+  WEAPONS.forEach((w, i) => { const b = document.createElement('button'); b.className = 'dp' + (SET.startWeapon === i ? ' on' : ''); b.innerHTML = `<span class="n">${tr(w.name)}</span>`; b.addEventListener('click', () => { SET.startWeapon = i; saveSettings(); renderWeaponPick(); AUDIO.sfx('ui'); }); box.appendChild(b); });
+}
 $('#aboutBtn').addEventListener('click', () => { $('#about').classList.add('show'); });
 $('#aboutClose').addEventListener('click', () => { $('#about').classList.remove('show'); });
 $('#archiveBtn').addEventListener('click', () => { renderArchive(); $('#archive').classList.add('show'); });
@@ -941,7 +1005,7 @@ function togglePause() {
   }
 }
 function statRows() {
-  return `<div>${tr('Time survived')} <b>${fmtTime(S.t)}</b></div><div>${tr('Level')} <b>${P.level}</b></div><div>${tr('Defeated')} <b>${S.stats.kills}</b></div><div>${tr('Elites')} <b>${S.stats.elites}</b></div><div>${tr('Damage dealt')} <b>${Math.round(S.stats.dmgDealt)}</b></div><div>${tr('Forge shards')} <b>${P.shards}</b></div>`;
+  return `<div>${tr('Time survived')} <b>${fmtTime(S.t)}</b></div><div>${tr('Level')} <b>${P.level}</b></div><div>${tr('Defeated')} <b>${S.stats.kills}</b></div><div>${tr('Elites')} <b>${S.stats.elites}</b></div><div>${tr('Damage dealt')} <b>${Math.round(S.stats.dmgDealt)}</b></div><div>${tr('Forge shards')} <b>${P.shards}</b></div><div>${tr('Shrines lit')} <b>${S.stats.shrines || 0} / 4</b></div><div>${tr('Elites felled')} <b>${S.stats.minis || 0} / 4</b></div>`;
 }
 function showBanner(text, secs = 4) { const b = $('#banner'); b.textContent = tr(text); b.classList.add('show'); S.bannerT = secs; }
 
@@ -955,15 +1019,17 @@ function startRun() {
   S.enemies.length = 0; S.pickups.length = 0; S.projectiles.length = 0; S.eprojectiles.length = 0; S.burns.length = 0; S.timers.length = 0;
   for (const m of S.slashes) scene.remove(m); S.slashes.length = 0;
   S.spawnBudget = 0; S.eliteTimer = 45; S.bossSpawned = false; S.boss = null; wardenRig.visible = false; S.bossIntro = 0; S.slowMo = 0; S.hitStop = 0;
+  S.minis = []; S.miniDone = {}; S.miniCorpses = []; S.miniWake = 0; for (const k in MINI_RIGS) MINI_RIGS[k].rig.visible = false; $('#mini').classList.remove('show');
   S.discovered = new Set(); S.lastDistrict = null;
-  S.stats = { kills: 0, elites: 0, dmgDealt: 0 }; S.dmgLog = {};
+  S.stats = { kills: 0, elites: 0, dmgDealt: 0, shrines: 0 }; S.dmgLog = {};
+  initShrines(); $('#shrine').classList.remove('show'); $('#shrineHint').classList.remove('show');
   W.tod = 'day'; W.wx = 'clear'; W.auto = true; W.wxTimer = 60 + Math.random() * 30; applyWeatherInstant();
   S.bossKilled = false;
   if (ANIM.p) { for (const k in ANIM.p.actions) if (!['idle', 'walk'].includes(k)) ANIM.p.actions[k].stop(); }
   if (ANIM.w) { for (const k in ANIM.w.actions) if (!['idle', 'walk', 'charge'].includes(k)) ANIM.w.actions[k].stop(); }
   S.bossCorpse = null;
   if (unlocked('tithe')) P.shards = 10;
-  if (unlocked('boltstart')) { P.weapon = 1; P.weaponRank.bolt = 1; }
+  if (unlocked('boltstart')) { P.weapon = Math.min(WEAPONS.length - 1, SET.startWeapon | 0); P.weaponRank.bolt = 1; }
   refreshWeatherButtons(); refreshAutoBtn(); refreshWeaponCard();
   $('#title').classList.remove('show'); $('#end').classList.remove('show'); $('#pause').classList.remove('show');
   document.body.classList.remove('title');
@@ -1013,12 +1079,61 @@ function saveBest() {
 // player actions
 // =====================================================================
 function nearForge() { return Math.hypot(P.x - world.forgePos.x, P.z - world.forgePos.z) < 3.8; }
+// shrines: one per outer district. Light it (F) → hold the ground for 45 s at doubled spawns → district ward + shards.
+const WARDS = {
+  wildwood:   { key: 'wolfsbane',  name: 'Wolfsbane',  desc: 'Wisps no longer hunt in packs and hit for half.' },
+  mossfall:   { key: 'stonewatch', name: 'Stonewatch', desc: 'Your attacks shatter spitter bolts; the rest sting 30% less.' },
+  cinder:     { key: 'ashwalker',  name: 'Ashwalker',  desc: 'Burning ground cannot hurt you; +25% damage to cinders and brutes.' },
+  silvermere: { key: 'tidewalker', name: 'Tidewalker', desc: 'Move 12% faster and dash recovers 25% sooner.' },
+};
+const SHRINE_HOLD = 45, SHRINE_LEASH = 18;
+function initShrines() {
+  S.shrines = {};
+  for (const D of DISTRICTS) if (D.key !== 'hearth') S.shrines[D.key] = { key: D.key, x: D.cx, z: D.cz, state: 'idle', t: 0, cd: 0 };
+  S.shrineActive = null;
+}
+function nearShrine() { if (!S.shrines) return null; for (const k in S.shrines) { const sh = S.shrines[k]; if (Math.hypot(P.x - sh.x, P.z - sh.z) < 3.6) return sh; } return null; }
+function lightShrine(sh) {
+  if (!sh || sh.state !== 'idle' || sh.cd > 0 || S.shrineActive) return;
+  sh.state = 'active'; sh.t = SHRINE_HOLD; S.shrineActive = sh;
+  showBanner(`${tr(DISTRICTS.find((d) => d.key === sh.key).name)}  ·  ${tr('Hold the shrine for 45 seconds.')}`, 4);
+  AUDIO.sfx('district'); spawnRing(sh.x, sh.z, 6, 0xffd08a, 0.8, 0.08); burstParticles(sh.x, 2, sh.z, 40, [1, 0.7, 0.3], 4, 0.5, 0.9, -1);
+  $('#shrine').classList.add('show');
+}
+function updateShrines(dt) {
+  if (!S.shrines) return;
+  for (const k in S.shrines) { const sh = S.shrines[k]; if (sh.cd > 0) sh.cd -= dt; }
+  const sh = S.shrineActive;
+  if (sh) {
+    sh.t -= dt;
+    const d = Math.hypot(P.x - sh.x, P.z - sh.z);
+    if (d > SHRINE_LEASH) { sh.state = 'idle'; sh.cd = 20; S.shrineActive = null; $('#shrine').classList.remove('show'); showBanner('THE SHRINE GUTTERS OUT  ·  You strayed too far.', 3); AUDIO.sfx('lose'); }
+    else if (sh.t <= 0) {
+      sh.state = 'done'; S.shrineActive = null; $('#shrine').classList.remove('show');
+      const w = WARDS[sh.key]; P.wards = P.wards || {}; P.wards[w.key] = true; applyWard(w.key);
+      P.shards += 20;
+      showBanner(`${tr('WARD GAINED')} · ${tr(w.name)}  ·  ${tr(w.desc)}`, 6);
+      AUDIO.sfx('win'); spawnRing(sh.x, sh.z, 10, 0x8ff0dc, 1.0, 0.06); burstParticles(sh.x, 2, sh.z, 120, [0.55, 0.95, 0.85], 7, 0.5, 1.2, -1);
+      for (let i = 0; i < 6; i++) dropPickup('ember', sh.x, sh.z, 4);
+      S.stats.shrines = (S.stats.shrines || 0) + 1;
+    } else {
+      $('#shrineBar > i').style.transform = `scaleX(${clamp(sh.t / SHRINE_HOLD, 0, 1)})`;
+      $('#shrine .name').textContent = `${tr('SHRINE')} · ${Math.ceil(sh.t)}s${d > SHRINE_LEASH - 4 ? '  ' + tr('· too far!') : ''}`;
+      if (Math.random() < 0.6) spawnParticle(sh.x + (Math.random() - 0.5) * 2, 3.2, sh.z + (Math.random() - 0.5) * 2, 0, 1.2 + Math.random(), 0, 1, 0.6, 0.25, 0.4, 1.0, 0.3);
+    }
+  }
+  const ns = nearShrine();
+  $('#shrineHint').classList.toggle('show', !!ns && ns.state === 'idle' && ns.cd <= 0 && !S.shrineActive);
+}
+function applyWard(key) {
+  if (key === 'tidewalker') { P.speedMult *= 1.12; P.dashCdMult = (P.dashCdMult || 1) * 0.75; }
+}
 function tryDash() {
   if (P.dashCd > 0 || P.dashT > 0) return;
   let dx = 0, dz = 0;
   const mv = moveVector();
   if (mv.len > 0.1) { dx = mv.x; dz = mv.z; } else { dx = Math.sin(P.facing); dz = Math.cos(P.facing); }
-  P.dashDx = dx; P.dashDz = dz; P.dashT = 0.22; P.dashCd = 1.6; P.invuln = Math.max(P.invuln, 0.3);
+  P.dashDx = dx; P.dashDz = dz; P.dashT = 0.22 * (P.dashLen || 1); P.dashCd = 1.6 * (P.dashCdMult || 1); P.invuln = Math.max(P.invuln, 0.3 * (P.dashLen || 1));
   AUDIO.sfx('dash');
   burstParticles(P.x, 0.3, P.z, 10, [0.6, 0.95, 0.9], 3, 0.35, 0.35, -2);
 }
@@ -1033,7 +1148,7 @@ function tryNova() {
     const d = Math.hypot(e.x - P.x, e.z - P.z);
     if (d < R + e.r) { hitCount++; hurtEnemy(e, dmg, true); const k = 14 / Math.max(0.5, d); e.kx += (e.x - P.x) * k / e.t.mass; e.kz += (e.z - P.z) * k / e.t.mass; e.stun = Math.max(e.stun, 0.8); }
   }
-  if (S.boss && Math.hypot(S.boss.x - P.x, S.boss.z - P.z) < R + S.boss.r) hurtBoss(dmg);
+  for (const b of bigs()) if (Math.hypot(b.x - P.x, b.z - P.z) < R + b.r) hurtBig(b, dmg);
   for (const pr of S.eprojectiles) pr.dead = true;
   spawnRing(P.x, P.z, R, 0xffb060, 0.6, 0.08);
   spawnRing(P.x, P.z, R * 0.7, 0xfff0c0, 0.4, 0.2);
@@ -1045,7 +1160,7 @@ function tryNova() {
 }
 function tryHeavy() {
   if (P.heavyCd > 0 || P.dashT > 0) return;
-  P.heavyCd = 2.4 / P.speedTalent;
+  P.heavyCd = 2.4 / P.speedTalent * (P.heavyCdMult || 1);
   P.swing = 0.35; P.animOnce = 'heavy';
   const R = 3.8 * P.areaMult;
   const dmg = 34 * dmgMult() * P.heavyMult;
@@ -1055,7 +1170,7 @@ function tryHeavy() {
     const d = Math.hypot(e.x - P.x, e.z - P.z);
     if (d < R + e.r) { hitCount++; hurtEnemy(e, dmg, Math.random() < 0.25); const k = 9 / Math.max(0.5, d); e.kx += (e.x - P.x) * k / e.t.mass; e.kz += (e.z - P.z) * k / e.t.mass; e.stun = Math.max(e.stun, 0.6 * P.heavyMult); }
   }
-  if (S.boss && Math.hypot(S.boss.x - P.x, S.boss.z - P.z) < R + S.boss.r) hurtBoss(dmg);
+  for (const b of bigs()) if (Math.hypot(b.x - P.x, b.z - P.z) < R + b.r) hurtBig(b, dmg);
   spawnSlash(P.x, P.z, P.facing, R, Math.PI * 2, 0xffd08a, 0.3, true);
   camShake.amp = Math.max(camShake.amp, 0.25); camShake.t = 0.2;
   if (hitCount >= 3) S.hitStop = 0.06;
@@ -1079,7 +1194,7 @@ function moveVector() {
 function nearestEnemy(range) {
   let best = null, bd = range * range;
   for (const e of S.enemies) { if (e.dying) continue; const d2 = (e.x - P.x) ** 2 + (e.z - P.z) ** 2; if (d2 < bd) { bd = d2; best = e; } }
-  if (S.boss) { const d2 = (S.boss.x - P.x) ** 2 + (S.boss.z - P.z) ** 2; if (d2 < bd) { bd = d2; best = S.boss; } }
+  for (const b of bigs()) { if (b.burrowed) continue; const d2 = (b.x - P.x) ** 2 + (b.z - P.z) ** 2; if (d2 < bd) { bd = d2; best = b; } }
   return best;
 }
 function fireWeapon(dt) {
@@ -1103,13 +1218,15 @@ function fireWeapon(dt) {
   P.swing = 0.22;
   if (w.type === 'melee') {
     meleeSwing(w, ang, 1, true);
-    if (P.weaponRank.crescent >= 2) S.timers.push({ t: 0.16, fn: () => { if (S.phase === 'run') { P.swing = 0.18; meleeSwing(w, ang + Math.PI * 0.35, 0.65, false); } } });
+    if (w.key === 'crescent' && P.weaponRank.crescent >= 2) S.timers.push({ t: 0.16, fn: () => { if (S.phase === 'run') { P.swing = 0.18; meleeSwing(w, ang + Math.PI * 0.35, 0.65, false); } } });
   } else {
-    const n = 1 + P.extraBolts + (P.weaponRank.bolt >= 2 ? 1 : 0);
+    const wr = P.weaponRank[w.key] || 0;
+    const n = w.key === 'bolt' ? 1 + P.extraBolts + (wr >= 2 ? 1 : 0) : (wr >= 2 ? 3 : 1);
     for (let i = 0; i < n; i++) {
-      const spread = n > 1 ? (i - (n - 1) / 2) * 0.16 : 0;
+      const spread = n > 1 ? (i - (n - 1) / 2) * (w.key === 'bow' ? 0.22 : 0.16) : 0;
       const a = ang + spread;
-      S.projectiles.push({ x: P.x + Math.sin(a) * 0.6, z: P.z + Math.cos(a) * 0.6, y: 0.9, vx: Math.sin(a) * w.speed, vz: Math.cos(a) * w.speed, life: w.range / w.speed, dmg: w.dmg * dmgMult(), pierce: w.pierce + (P.weaponRank.bolt >= 1 ? 1 : 0), burst: P.weaponRank.bolt >= 3, hit: new Set() });
+      const pierce = w.pierce + (w.key === 'bolt' ? (wr >= 1 ? 1 : 0) : (wr >= 1 ? 2 : 0));
+      S.projectiles.push({ x: P.x + Math.sin(a) * 0.6, z: P.z + Math.cos(a) * 0.6, y: 0.9, vx: Math.sin(a) * w.speed, vz: Math.cos(a) * w.speed, life: w.range / w.speed, dmg: w.dmg * dmgMult() * (w.key === 'bolt' ? (P.boltMult || 1) : 1), pierce, burst: w.key === 'bolt' && wr >= 3, scorch: w.key === 'bow' && wr >= 3, heavy: !!w.heavyBolt, hit: new Set() });
     }
     AUDIO.sfx('swing', 0.05);
     spawnParticle(P.x + Math.sin(ang) * 0.7, 0.9, P.z + Math.cos(ang) * 0.7, 0, 0.5, 0, 1, 0.7, 0.3, 0.6, 0.15, 0);
@@ -1117,8 +1234,11 @@ function fireWeapon(dt) {
 }
 function meleeSwing(w, ang, dmgScale, primary) {
   {
-    const R = w.range * P.areaMult, arc = w.arc * Math.sqrt(P.areaMult) * (P.weaponRank.crescent >= 1 ? 1.25 : 1);
-    const dmg = w.dmg * dmgMult() * dmgScale;
+    const wr = P.weaponRank[w.key] || 0;
+    const R = w.range * P.areaMult * (w.key === 'chain' && wr >= 2 ? 1.4 : 1), arc = w.arc * Math.sqrt(P.areaMult) * (w.key === 'crescent' && wr >= 1 ? 1.25 : 1);
+    let dmg = w.dmg * dmgMult() * dmgScale;
+    let comboHit = false;
+    if (w.key === 'chain' && wr >= 1) { P.combo = (P.combo + 1) % 3; if (P.combo === 0) { dmg *= 2.5; comboHit = true; } }
     let hits = 0;
     const test = (e, isBoss) => {
       if (e.dying) return;
@@ -1126,21 +1246,22 @@ function meleeSwing(w, ang, dmgScale, primary) {
       if (d > R + e.r) return;
       let da = Math.atan2(dx, dz) - ang; da = Math.atan2(Math.sin(da), Math.cos(da));
       if (Math.abs(da) > arc / 2 + Math.atan2(e.r, Math.max(d, 0.1))) return;
-      const crit = Math.random() < 0.12;
-      if (isBoss) hurtBoss(dmg * (crit ? 1.8 : 1), crit); else { hurtEnemy(e, dmg * (crit ? 1.8 : 1), crit); const k = 3.5 / Math.max(0.5, d); e.kx += dx * k / e.t.mass; e.kz += dz * k / e.t.mass; }
+      const crit = comboHit || Math.random() < 0.12 + (P.critBonus || 0);
+      if (isBoss) hurtBig(e, dmg * (crit ? 1.8 : 1), crit); else { hurtEnemy(e, dmg * (crit ? 1.8 : 1), crit); const pull = w.key === 'chain' && wr >= 3; const k = (pull ? -2.5 : 3.5) / Math.max(0.5, d); e.kx += dx * k / e.t.mass; e.kz += dz * k / e.t.mass; }
       hits++;
     };
     for (const e of S.enemies) test(e, false);
-    if (S.boss) test(S.boss, true);
+    for (const b of bigs()) test(b, true);
+    if (P.wards && P.wards.stonewatch) for (const pr of S.eprojectiles) { const dx = pr.x - P.x, dz = pr.z - P.z; if (Math.hypot(dx, dz) < R + 0.4) { let da = Math.atan2(dx, dz) - ang; da = Math.atan2(Math.sin(da), Math.cos(da)); if (Math.abs(da) < arc / 2 + 0.3) pr.dead = true; } }
     spawnSlash(P.x, P.z, ang, R, arc, primary ? 0xffb060 : 0xffd9a0, primary ? 0.22 : 0.18);
-    if (hits && P.weaponRank.crescent >= 3) { P.hp = Math.min(P.maxHp, P.hp + Math.min(hits, 3)); }
+    if (hits && w.key === 'crescent' && wr >= 3) { P.hp = Math.min(P.maxHp, P.hp + Math.min(hits, 3)); }
     AUDIO.sfx(hits ? 'hit' : 'swing', 0.05);
   }
 }
 function updateOrbs(dt) {
   const w = WEAPONS[2];
   const active = P.weapon === 2;
-  const count = active ? w.count + P.extraOrbs + (P.weaponRank.lantern >= 1 ? 1 : 0) : 0;
+  const count = active ? w.count + P.extraOrbs + (P.weaponRank.lantern >= 1 ? 1 : 0) : (P.orbAlways ? 2 : 0);
   P.orbitA += dt * 2.6 * P.speedTalent;
   const R = w.radius * P.areaMult * (P.weaponRank.lantern >= 2 ? 1.3 : 1);
   P.scorchT = (P.scorchT || 0) - dt;
@@ -1164,9 +1285,9 @@ function updateOrbs(dt) {
         if (S.t - last > w.rate / P.speedTalent) { P.orbHits.set(e, S.t); hurtEnemy(e, dmg, false); const k = 2 / Math.max(0.5, d); e.kx += (e.x - P.x) * k / e.t.mass; e.kz += (e.z - P.z) * k / e.t.mass; AUDIO.sfx('hit', 0.08); }
       }
     }
-    if (S.boss) {
-      const d = Math.hypot(S.boss.x - g.position.x, S.boss.z - g.position.z);
-      if (d < S.boss.r + 0.45) { const last = P.orbHits.get(S.boss) || -9; if (S.t - last > w.rate / P.speedTalent) { P.orbHits.set(S.boss, S.t); hurtBoss(dmg); } }
+    for (const b of bigs()) {
+      const d = Math.hypot(b.x - g.position.x, b.z - g.position.z);
+      if (d < b.r + 0.45) { const last = P.orbHits.get(b) || -9; if (S.t - last > w.rate / P.speedTalent) { P.orbHits.set(b, S.t); hurtBig(b, dmg); } }
     }
   }
 }
@@ -1181,15 +1302,16 @@ function updateProjectiles(dt) {
         if (p.hit.has(e) || e.dying) continue;
         if ((e.x - p.x) ** 2 + (e.z - p.z) ** 2 < (e.r + 0.35) ** 2) {
           p.hit.add(e);
-          const crit = Math.random() < 0.1;
+          const crit = Math.random() < 0.1 + (P.critBonus || 0);
           hurtEnemy(e, p.dmg * (crit ? 1.8 : 1), crit);
           const k = 2.5; e.kx += p.vx / 24 * k / e.t.mass; e.kz += p.vz / 24 * k / e.t.mass;
           AUDIO.sfx('hit', 0.05);
           if (p.burst) { burstParticles(p.x, p.y, p.z, 10, [1, 0.55, 0.2], 3, 0.35, 0.35); for (const o of S.enemies) { if (o === e || p.hit.has(o)) continue; if ((o.x - p.x) ** 2 + (o.z - p.z) ** 2 < 1.8 * 1.8) hurtEnemy(o, p.dmg * 0.5, false, true); } }
+          if (p.scorch && !p.scorched) { p.scorched = true; S.burns.push({ x: p.x, z: p.z, t: 2.0 * (P.burnDur || 1) }); if (S.burns.length > 60) S.burns.shift(); }
           if (p.hit.size > p.pierce) { dead = true; break; }
         }
       }
-      if (!dead && S.boss && !p.hit.has(S.boss) && (S.boss.x - p.x) ** 2 + (S.boss.z - p.z) ** 2 < (S.boss.r + 0.35) ** 2) { p.hit.add(S.boss); hurtBoss(p.dmg); dead = true; }
+      if (!dead) for (const b of bigs()) { if (p.hit.has(b) || b.burrowed) continue; if ((b.x - p.x) ** 2 + (b.z - p.z) ** 2 < (b.r + 0.35) ** 2) { p.hit.add(b); hurtBig(b, p.dmg); dead = true; break; } }
     }
     if (dead) { burstParticles(p.x, p.y, p.z, 4, [1, 0.6, 0.2], 2, 0.3, 0.3); S.projectiles.splice(i, 1); }
   }
@@ -1203,9 +1325,14 @@ function updateProjectiles(dt) {
 }
 function hurtPlayer(raw, src = 'other') {
   if (P.invuln > 0 || P.dashT > 0 || S.phase !== 'run') return;
-  const dmg = Math.max(1, Math.round(raw * (1 - armour())));
+  let scaled = raw * DIFF().dmg;
+  if (P.wards && P.wards.wolfsbane && src === 'wisp') scaled *= 0.5;
+  if (P.wards && P.wards.stonewatch && src === 'spit') scaled *= 0.7;
+  if (P.eliteRes && (src === 'brute' || src.startsWith('boss'))) scaled *= 1 - P.eliteRes;
+  const dmg = Math.max(1, Math.round(scaled * (1 - armour())));
   S.dmgLog[src] = (S.dmgLog[src] || 0) + dmg;
-  P.hp -= dmg; P.invuln = 0.6; P.hitFlash = 0.2; if (!P.animOnce) P.animOnce = 'hurt';
+  P.hp -= dmg; P.invuln = 0.6 + (P.invBonus || 0); P.hitFlash = 0.2; if (!P.animOnce) P.animOnce = 'hurt';
+  if (P.shell) { const sd = 10 * P.shell * dmgMult(); for (const e of S.enemies) { if (!e.dying && (e.x - P.x) ** 2 + (e.z - P.z) ** 2 < 9) { hurtEnemy(e, sd, false, true); const d = Math.hypot(e.x - P.x, e.z - P.z) || 0.5; e.kx += (e.x - P.x) / d * 4 / e.t.mass; e.kz += (e.z - P.z) / d * 4 / e.t.mass; } } spawnRing(P.x, P.z, 3, 0xff8a4a, 0.35, 0.15); }
   showNumber(P.x, 1.6, P.z, '-' + dmg, 'player');
   $('#hurt').style.opacity = '1'; setTimeout(() => { $('#hurt').style.opacity = '0'; }, 120);
   camShake.amp = Math.max(camShake.amp, 0.3); camShake.t = 0.25;
@@ -1227,19 +1354,36 @@ function gainXp(n) {
 // level-up modal
 // =====================================================================
 let luOptions = [];
+function rollTalents() {
+  const avail = TALENTS.filter((t) => (P.talents[t.key] || 0) < t.max
+    && !(t.key === 'twin' && P.weapon !== 1 && Math.random() < 0.5)
+    && !(t.key === 'tongue' && P.weapon !== 1 && Math.random() < 0.6)
+    && !(t.key === 'wind' && P.noRegen)
+    && !(t.keystone && (P.keystone || P.level < 3)));
+  const nOpt = unlocked('fourth') ? 4 : 3;
+  const out = [];
+  // weighted draw: commons 1, rares 0.55, keystones 0.35 (and at most one keystone per roll)
+  const pool = avail.map((t) => ({ t, w: t.keystone ? 0.35 : (t.rare ? 0.55 : 1) }));
+  while (out.length < nOpt && pool.length) {
+    let sum = 0; for (const p of pool) sum += p.w;
+    let r = Math.random() * sum, idx = 0;
+    for (let i = 0; i < pool.length; i++) { r -= pool[i].w; if (r <= 0) { idx = i; break; } }
+    const pick = pool.splice(idx, 1)[0].t;
+    out.push(pick);
+    if (pick.keystone) for (let i = pool.length - 1; i >= 0; i--) if (pool[i].t.keystone) pool.splice(i, 1);
+  }
+  return out;
+}
 function openLevelUp() {
   S.modal = 'levelup'; S.paused = true;
-  const avail = TALENTS.filter((t) => (P.talents[t.key] || 0) < t.max && !(t.key === 'twin' && P.weapon !== 1 && Math.random() < 0.5));
-  const pool = avail.slice();
-  luOptions = [];
-  const nOpt = unlocked('fourth') ? 4 : 3;
-  while (luOptions.length < nOpt && pool.length) luOptions.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+  luOptions = rollTalents();
   $('#luSub').textContent = `${tr('Choose a talent. Your run is paused.')}  [ ${luOptions.map((_, i) => i + 1).join(' / ')} ]`;
   $('#luTitle').textContent = `${tr('Level')} ${pad2(P.level)}. ${tr(LEVEL_NAMES[Math.min(LEVEL_NAMES.length - 1, P.level - 2)])}`;
   const box = $('#luChoices'); box.innerHTML = '';
   luOptions.forEach((t, i) => {
-    const b = document.createElement('button'); b.className = 'choice';
-    b.innerHTML = `<div class="t">${i + 1} &nbsp;${tr(t.name)}<small>${(P.talents[t.key] || 0) + 1}/${t.max}</small></div><div class="d">${tr(t.desc)}</div>`;
+    const b = document.createElement('button'); b.className = 'choice' + (t.keystone ? ' keystone' : (t.rare ? ' rare' : ''));
+    const tag = t.keystone ? `<em>${tr('Keystone')}</em>` : (t.rare ? `<em>${tr('Rare')}</em>` : '');
+    b.innerHTML = `<div class="t">${i + 1} &nbsp;${tr(t.name)}<small>${(P.talents[t.key] || 0) + 1}/${t.max}</small>${tag}</div><div class="d">${tr(t.desc)}</div>`;
     b.addEventListener('click', () => pickTalent(i));
     box.appendChild(b);
   });
@@ -1309,7 +1453,7 @@ const enemyGrid = new Grid(4);
 const _near = [];
 function spawnEnemy(type, x, z, opts = {}) {
   const t = ETYPES[type];
-  const hpScale = (1 + 0.16 * minute()) * (opts.hpMul || 1) * (S.endless ? 1.35 : 1);
+  const hpScale = (1 + 0.16 * minute()) * (opts.hpMul || 1) * (S.endless ? 1.35 : 1) * DIFF().hp;
   const e = { type, t, x, z, hp: t.hp * hpScale, maxHp: t.hp * hpScale, r: t.r, kx: 0, kz: 0, stun: 0, atkCd: 0.6 + Math.random() * 0.5, flash: 0, face: 0, bob: Math.random() * 6, shootCd: 1 + Math.random() * 2, lungeCd: 2, lungeT: 0, scale: opts.scale || (t.elite ? 1.1 : 1.0 + Math.random() * 0.3), dead: false, spawnT: 0.4 };
   S.enemies.push(e);
   return e;
@@ -1341,7 +1485,8 @@ function mixFor() {
 function pickType(w) { let s = 0; for (const k in w) s += w[k]; let r = Math.random() * s; for (const k in w) { r -= w[k]; if (r <= 0) return k; } return 'wisp'; }
 function updateSpawner(dt) {
   const m = minute();
-  const rate = (0.55 + m * 0.3 + (S.endless ? 0.8 : 0)) * (S.district.key === 'hearth' ? 0.8 : 1) * (S.district.key === 'cinder' ? 1.2 : 1);
+  const shrineActive = S.shrineActive;
+  const rate = (0.55 + m * 0.3 + (S.endless ? 0.8 : 0)) * DIFF().spawn * (S.district.key === 'hearth' ? 0.8 : 1) * (S.district.key === 'cinder' ? 1.2 : 1) * (shrineActive ? 2.0 : 1);
   const cap = Math.min(260, 28 + m * 14 + (S.endless ? 50 : 0));
   S.spawnBudget += rate * dt;
   const w = mixFor();
@@ -1349,18 +1494,18 @@ function updateSpawner(dt) {
     S.spawnBudget -= 1;
     const type = pickType(w);
     // packs
-    const n = type === 'wisp' ? 2 + Math.floor(Math.random() * 2) : 1;
+    const n = type === 'wisp' && !(P.wards && P.wards.wolfsbane) ? 2 + Math.floor(Math.random() * 2) : 1;
     const e = spawnAround(type, { hpMul: S.district.key === 'cinder' ? 1.2 : 1 });
     if (e && n > 1) for (let i = 1; i < n; i++) { const a = Math.random() * 6.28; spawnEnemy(type, e.x + Math.cos(a) * 1.5, e.z + Math.sin(a) * 1.5); }
   }
   S.eliteTimer -= dt;
   if (S.eliteTimer <= 0 && m > 1.8) {
-    S.eliteTimer = Math.max(22, 50 - m * 2.5);
+    S.eliteTimer = Math.max(22, 50 - m * 2.5) * DIFF().elite;
     const e = spawnAround('brute', { hpMul: 1 });
     if (e) { showBanner('AN ASH BRUTE PROWLS NEARBY', 3); AUDIO.sfx('roar'); }
   }
-  if (!S.bossSpawned && S.t >= BOSS_AT && !S.endless) spawnBoss();
-  if (S.endless && !S.boss && S.t > BOSS_AT && (S.t - BOSS_AT) % 240 < dt) spawnBoss();
+  if (!S.bossSpawned && S.t >= BOSS_AT_FN() && !S.endless) spawnBoss();
+  if (S.endless && !S.boss && S.t > BOSS_AT_FN() && (S.t - BOSS_AT_FN()) % 240 < dt) spawnBoss();
 }
 function updateEnemies(dt) {
   enemyGrid.clear();
@@ -1377,7 +1522,7 @@ function updateEnemies(dt) {
     const dx = px - e.x, dz = pz - e.z;
     const d = Math.hypot(dx, dz) || 0.001;
     const nx = dx / d, nz = dz / d;
-    let sp = e.t.speed * (0.9 + 0.1 * Math.sin(e.bob)) * (1 + minute() * 0.02);
+    let sp = e.t.speed * (0.9 + 0.1 * Math.sin(e.bob)) * (1 + minute() * 0.02) * DIFF().speed;
     let mx = nx, mz = nz;
     if (e.t.ranged) {
       if (d < 7) { mx = -nx; mz = -nz; sp *= 0.8; } else if (d < 10) { mx = nz; mz = -nx; sp *= 0.5; }
@@ -1402,12 +1547,14 @@ function updateEnemies(dt) {
     // contact damage
     if (d < e.r + P.r + 0.15 && e.atkCd <= 0 && e.stun <= 0) { e.atkCd = 1.0; hurtPlayer(e.t.dmg * (S.endless ? 1.25 : 1), e.type); }
     // burning ground
-    if (S.burns.length) for (const b of S.burns) { if ((e.x - b.x) ** 2 + (e.z - b.z) ** 2 < 1.2) { e.burnT = (e.burnT || 0) + dt; if (e.burnT > 0.25) { e.burnT = 0; hurtEnemy(e, 5 * dmgMult(), false, true); } } }
+    if (S.burns.length) for (const b of S.burns) { if ((e.x - b.x) ** 2 + (e.z - b.z) ** 2 < 1.2) { e.burnT = (e.burnT || 0) + dt; if (e.burnT > 0.25) { e.burnT = 0; hurtEnemy(e, 5 * dmgMult() * (P.burnMult || 1), false, true); } } }
   }
 }
 function hurtEnemy(e, dmg, crit = false, quiet = false) {
   if (e.dead || e.dying) return;
+  if (P.wards && P.wards.ashwalker && (e.type === 'cinder' || e.type === 'brute')) dmg *= 1.25;
   e.hp -= dmg; e.flash = 1;
+  if (P.leech) P.hp = Math.min(P.maxHp, P.hp + dmg * P.leech);
   S.stats.dmgDealt += dmg;
   if (!quiet) showNumber(e.x, 1.2 * e.scale, e.z, String(Math.round(dmg)), crit ? 'crit' : '');
   if (crit && !quiet) AUDIO.sfx('crit', 0.1);
@@ -1427,7 +1574,8 @@ function killEnemy(e) {
   const shardChance = e.t.elite ? 1 : e.t.shards * P.luck * 0.9;
   if (e.t.elite) { for (let i = 0; i < Math.round(e.t.shards * P.luck); i++) dropPickup('shard', e.x, e.z, 1); }
   else if (Math.random() < shardChance) dropPickup('shard', e.x, e.z, 1);
-  if (e.t.elite || Math.random() < 0.04) dropPickup('heart', e.x, e.z, 25);
+  if (e.t.elite || Math.random() < 0.04 * (P.heartMult || 1)) dropPickup('heart', e.x, e.z, 25);
+  if (P.kindling && Math.random() < P.kindling) dropPickup('ember', e.x, e.z, e.t.xp);
 }
 function dropPickup(kind, x, z, value) {
   const a = Math.random() * Math.PI * 2, r = 0.3 + Math.random() * 1.2;
@@ -1446,12 +1594,13 @@ function updatePickups(dt) {
       S.pickups.splice(i, 1);
       if (p.kind === 'ember') { gainXp(p.value); AUDIO.sfx('ember', 0.04); spawnParticle(p.x, 0.6, p.z, 0, 2, 0, 0.5, 0.95, 0.85, 0.5, 0.3, 0); }
       else if (p.kind === 'shard') { P.shards += p.value; AUDIO.sfx('shard', 0.05); spawnParticle(p.x, 0.6, p.z, 0, 2, 0, 1, 0.7, 0.3, 0.6, 0.35, 0); }
-      else { P.hp = Math.min(P.maxHp, P.hp + p.value); showNumber(P.x, 1.6, P.z, '+' + p.value, 'heal'); AUDIO.sfx('heart'); burstParticles(P.x, 0.8, P.z, 12, [0.6, 1, 0.75], 2, 0.35, 0.5, -1); }
+      else { const heal = P.leech ? Math.round(p.value / 2) : p.value; P.hp = Math.min(P.maxHp, P.hp + heal); showNumber(P.x, 1.6, P.z, '+' + heal, 'heal'); AUDIO.sfx('heart'); burstParticles(P.x, 0.8, P.z, 12, [0.6, 1, 0.75], 2, 0.35, 0.5, -1); }
     }
   }
 }
 function updateBurns(dt) {
-  for (let i = S.burns.length - 1; i >= 0; i--) { const b = S.burns[i]; b.t -= dt; if (Math.random() < 0.4) spawnParticle(b.x + (Math.random() - 0.5), 0.1, b.z + (Math.random() - 0.5), 0, 1.5, 0, 1, 0.5, 0.15, 0.4, 0.5, 0); if (b.t <= 0) S.burns.splice(i, 1); }
+  for (let i = S.burns.length - 1; i >= 0; i--) { const b = S.burns[i]; b.t -= dt;
+    if (b.hostile && !(P.wards && P.wards.ashwalker) && (P.x - b.x) ** 2 + (P.z - b.z) ** 2 < 1.4) { P.burnT = (P.burnT || 0) + dt; if (P.burnT > 0.5) { P.burnT = 0; hurtPlayer(6, 'burn'); } } if (Math.random() < 0.4) spawnParticle(b.x + (Math.random() - 0.5), 0.1, b.z + (Math.random() - 0.5), 0, 1.5, 0, 1, 0.5, 0.15, 0.4, 0.5, 0); if (b.t <= 0) S.burns.splice(i, 1); }
 }
 
 // =====================================================================
@@ -1476,6 +1625,8 @@ function spawnBoss() {
   burstParticles(x, 1, z, 120, [1, 0.45, 0.15], 8, 0.6, 1.2);
   spawnRing(x, z, 8, 0xff6a3d, 0.9, 0.06);
 }
+const bigs = () => (S.boss ? [S.boss] : []).concat(S.minis || []);
+function hurtBig(b, dmg, crit = false) { if (b === S.boss) hurtBoss(dmg, crit); else hurtMini(b, dmg, crit); }
 function hurtBoss(dmg, crit = false) {
   const b = S.boss; if (!b || b.dead) return;
   b.hp -= dmg; b.flash = 1; S.stats.dmgDealt += dmg;
@@ -1497,6 +1648,119 @@ function hurtBoss(dmg, crit = false) {
     for (let i = 1; i <= 6; i++) S.timers.push({ t: i * 0.12, fn: () => { burstParticles(b.x, 1 + i * 0.4, b.z, 40, [1, 0.6 + i * 0.05, 0.2], 5 + i, 0.5, 1.0); spawnRing(b.x, b.z, 4 + i * 2, 0xffd08a, 0.6, 0.05); } });
     AUDIO.sfx('slam'); AUDIO.setTension(0.3);
   }
+}
+// district elites: one per outer district, wakes ~8 s after you first arrive (from 1:15 on), two signature moves each
+const MINIS = {
+  wildwood:   { key: 'wolfking',   kit: 'WolfKing',   pre: 'M1_', name: 'THE WOLF KING',         hp: 900,  dmg: 18, speed: 5.0, r: 1.1, scale: 1.05, moves: ['pounce', 'howl'] },
+  mossfall:   { key: 'sentinel',   kit: 'Sentinel',   pre: 'M2_', name: 'THE STONE SENTINEL',    hp: 1500, dmg: 24, speed: 2.4, r: 1.25, scale: 1.0, moves: ['slam', 'shards'] },
+  cinder:     { key: 'salamander', kit: 'Salamander', pre: 'M3_', name: 'THE CINDER SALAMANDER', hp: 1100, dmg: 16, speed: 4.4, r: 1.1, scale: 1.05, moves: ['flame', 'spit'] },
+  silvermere: { key: 'maw',        kit: 'Maw',        pre: 'M4_', name: 'THE SILVERMERE MAW',    hp: 1350, dmg: 22, speed: 2.9, r: 1.3, scale: 1.0, moves: ['engulf', 'burrow'] },
+};
+const MINI_RIGS = {};
+function buildMiniRigs() {
+  for (const k in MINIS) { const d = MINIS[k]; const rig = mergeRig(kit.rigs[d.kit].clone(true)); rig.visible = false; scene.add(rig); MINI_RIGS[k] = { rig, anim: makeRigAnimator(rig, d.pre) }; }
+}
+function spawnMini(distKey) {
+  const d = MINIS[distKey]; if (!d) return null;
+  if (S.minis.some((m) => m.key === d.key) || (S.miniDone && S.miniDone[d.key])) return null;
+  const a = Math.random() * Math.PI * 2;
+  let x = P.x + Math.cos(a) * 18, z = P.z + Math.sin(a) * 18;
+  const r = Math.hypot(x, z); if (r > PLAY_R - 4) { x *= (PLAY_R - 4) / r; z *= (PLAY_R - 4) / r; }
+  const hp = (d.hp + minute() * 90) * DIFF().hp * (S.endless ? 1.4 : 1);
+  const m = { mini: true, key: d.key, def: d, x, z, r: d.r, hp, maxHp: hp, face: 0, flash: 0, kx: 0, kz: 0, t: { mass: 12, dmg: d.dmg }, atkCd: 1, moveCd: 3.5, moveIdx: 0, phase: 'chase', pt: 0, burrowed: false, speedMul: 1, buffT: 0, dead: false, animOnce: 'special', bob: 0 };
+  S.minis.push(m);
+  const R = MINI_RIGS[distKey]; R.rig.visible = true; R.rig.position.set(x, 0, z); R.rig.scale.setScalar(d.scale);
+  for (const k in R.anim.actions) if (!['idle', 'walk'].includes(k)) R.anim.actions[k].stop();
+  setBase(R.anim, 0);
+  m.rigKey = distKey;
+  showBanner(tr(d.name) + '  ·  ' + tr('wakes'), 4); AUDIO.sfx('roar');
+  spawnRing(x, z, 6, 0xc48aff, 0.9, 0.08); burstParticles(x, 1, z, 60, [0.75, 0.5, 1], 6, 0.5, 1.0);
+  $('#mini').classList.add('show'); $('#mini .name').textContent = tr(d.name);
+  return m;
+}
+function hurtMini(m, dmg, crit = false) {
+  if (!m || m.dead || m.burrowed) return;
+  m.hp -= dmg; m.flash = 1; S.stats.dmgDealt += dmg;
+  if (P.leech) P.hp = Math.min(P.maxHp, P.hp + dmg * P.leech);
+  showNumber(m.x, 2.4, m.z, String(Math.round(dmg)), crit ? 'crit' : '');
+  burstParticles(m.x, 1.2, m.z, 4, [0.8, 0.5, 1], 3, 0.3, 0.4);
+  if (m.hp <= 0) killMini(m);
+}
+function killMini(m) {
+  m.dead = true; S.minis.splice(S.minis.indexOf(m), 1);
+  S.miniDone = S.miniDone || {}; S.miniDone[m.key] = true;
+  S.stats.elites++; S.stats.kills++; S.stats.minis = (S.stats.minis || 0) + 1;
+  META.bestiary = META.bestiary || {}; if (!META.bestiary[m.key]) { META.bestiary[m.key] = new Date().toISOString().slice(0, 10); saveMeta(); showBanner(tr('FIRST KILL') + ' · ' + tr(m.def.name), 5); }
+  else showBanner(tr(m.def.name) + '  ·  ' + tr('falls'), 4);
+  const R = MINI_RIGS[m.rigKey]; setBase(R.anim, 0); playOnce(R.anim, 'death', 1); m.corpseT = 3;
+  S.miniCorpses = S.miniCorpses || []; S.miniCorpses.push(m);
+  for (let i = 0; i < 10; i++) dropPickup('ember', m.x, m.z, 4);
+  for (let i = 0; i < 8; i++) dropPickup('shard', m.x, m.z, 1);
+  dropPickup('heart', m.x, m.z, 40);
+  burstParticles(m.x, 1.2, m.z, 150, [0.8, 0.5, 1], 8, 0.6, 1.3); spawnRing(m.x, m.z, 9, 0xc48aff, 0.9, 0.06);
+  camShake.amp = 0.6; camShake.t = 0.6; AUDIO.sfx('slam');
+  if (!S.minis.length) $('#mini').classList.remove('show');
+}
+function updateMinis(dt) {
+  if (S.miniCorpses) for (let i = S.miniCorpses.length - 1; i >= 0; i--) { const m = S.miniCorpses[i]; m.corpseT -= S.dtRaw; MINI_RIGS[m.rigKey].anim.mixer.update(S.dtRaw); if (m.corpseT <= 0) { MINI_RIGS[m.rigKey].rig.visible = false; S.miniCorpses.splice(i, 1); } }
+  // wake the district elite a few seconds after arrival
+  if (S.t > 75 && S.district.key !== 'hearth' && !S.minis.length && !(S.miniDone && S.miniDone[MINIS[S.district.key].key])) {
+    S.miniWake = (S.miniWake || 0) + dt; if (S.miniWake > 8) { S.miniWake = 0; spawnMini(S.district.key); }
+  } else S.miniWake = 0;
+  for (const m of S.minis) {
+    const d0 = m.def; const R = MINI_RIGS[m.rigKey]; const A = R.anim;
+    m.flash = Math.max(0, m.flash - dt * 6); m.bob += dt; m.atkCd -= dt; m.moveCd -= dt; m.buffT -= dt;
+    const dx = P.x - m.x, dz = P.z - m.z, d = Math.hypot(dx, dz) || 0.001, nx = dx / d, nz = dz / d;
+    let walking = false;
+    const sp = d0.speed * DIFF().speed * (m.buffT > 0 ? 1.35 : 1);
+    if (m.phase === 'chase') {
+      if (d > m.r + P.r + 0.2) { m.x += nx * sp * dt; m.z += nz * sp * dt; walking = true; }
+      m.face = Math.atan2(nx, nz);
+      if (d < m.r + P.r + 0.4 && m.atkCd <= 0) { m.atkCd = 1.3; hurtPlayer(d0.dmg, 'mini'); m.animOnce = 'attack'; }
+      if (m.moveCd <= 0 && d < 22) { const mv = d0.moves[m.moveIdx % 2]; m.moveIdx++; m.moveCd = 5.5; startMiniMove(m, mv, nx, nz); }
+    } else if (m.phase === 'tele') {
+      m.pt -= dt; m.face = Math.atan2(nx, nz);
+      if (m.pt <= 0) resolveMiniMove(m, nx, nz, d);
+    } else if (m.phase === 'dash') {
+      m.pt -= dt; m.x += m.dx * m.dashSp * dt; m.z += m.dz * m.dashSp * dt; walking = true;
+      if (m.move === 'flame' && Math.random() < 0.8) { S.burns.push({ x: m.x, z: m.z, t: 3 * (P.burnDur || 1), hostile: true }); if (S.burns.length > 70) S.burns.shift(); }
+      if (d < m.r + P.r + 0.6 && m.atkCd <= 0) { m.atkCd = 1.0; hurtPlayer(m.move === 'pounce' ? 28 : 14, 'mini'); }
+      if (m.pt <= 0) { m.phase = 'chase'; }
+    } else if (m.phase === 'engulf') {
+      m.pt -= dt; if (d < 9 && d > m.r + 0.5) { P.x -= nx * 6 * dt; P.z -= nz * 6 * dt; }
+      if (m.pt <= 0) { m.phase = 'chase'; if (d < m.r + 1.6) { hurtPlayer(30, 'mini'); m.animOnce = 'attack'; } }
+    } else if (m.phase === 'burrow') {
+      m.pt -= dt; m.burrowed = true; R.rig.visible = false;
+      if (m.pt <= 0) { m.phase = 'chase'; m.burrowed = false; const a = Math.random() * Math.PI * 2; m.x = P.x + Math.cos(a) * 4; m.z = P.z + Math.sin(a) * 4; R.rig.visible = true; spawnRing(m.x, m.z, 4, 0x8fd0a0, 0.6, 0.1); burstParticles(m.x, 0.5, m.z, 40, [0.5, 0.6, 0.4], 5, 0.5, 0.8); m.atkCd = 0.4; }
+    }
+    if (m.phase !== 'burrow') collideStatic(m, world.obstacles, m.r * 0.8);
+    const rr = Math.hypot(m.x, m.z); if (rr > PLAY_R - 2) { m.x *= (PLAY_R - 2) / rr; m.z *= (PLAY_R - 2) / rr; }
+    // rig
+    R.rig.position.set(m.x, 0, m.z); R.rig.rotation.y = m.face;
+    setBase(A, walking ? 1 : 0, 1.2 * (m.buffT > 0 ? 1.4 : 1));
+    if (m.animOnce) { playOnce(A, m.animOnce, m.animOnce === 'attack' ? 1.4 : 1); m.animOnce = null; }
+    A.mixer.update(dt);
+    R.rig.traverse((o) => { if (o.isMesh && o.material.emissive) o.material.emissive.setRGB(m.flash * 0.7, m.flash * 0.4, m.flash * 0.9); });
+  }
+  if (S.minis.length) { const m = S.minis[0]; $('#minibar > i').style.transform = `scaleX(${clamp(m.hp / m.maxHp, 0, 1)})`; }
+}
+function startMiniMove(m, mv, nx, nz) {
+  m.move = mv; m.animOnce = 'special';
+  if (mv === 'pounce' || mv === 'flame') { m.phase = 'tele'; m.pt = mv === 'pounce' ? 0.5 : 0.4; m.dx = nx; m.dz = nz; spawnRing(m.x, m.z, 3, 0xff8a4a, 0.5, 0.15); }
+  else if (mv === 'howl') { m.phase = 'tele'; m.pt = 0.8; }
+  else if (mv === 'slam') { m.phase = 'tele'; m.pt = 0.9; spawnRing(m.x, m.z, 4.5, 0xff4a2a, 0.9, 0.35); }
+  else if (mv === 'shards' || mv === 'spit') { m.phase = 'tele'; m.pt = 0.5; }
+  else if (mv === 'engulf') { m.phase = 'engulf'; m.pt = 1.3; spawnRing(m.x, m.z, 9, 0x8fd0a0, 1.3, 0.05); }
+  else if (mv === 'burrow') { m.phase = 'burrow'; m.pt = 1.6; burstParticles(m.x, 0.5, m.z, 40, [0.5, 0.6, 0.4], 5, 0.5, 0.8); }
+}
+function resolveMiniMove(m, nx, nz, d) {
+  const mv = m.move; m.phase = 'chase';
+  if (mv === 'pounce') { m.phase = 'dash'; m.pt = 0.45; m.dashSp = 22; m.dx = nx; m.dz = nz; AUDIO.sfx('dash'); }
+  else if (mv === 'flame') { m.phase = 'dash'; m.pt = 0.75; m.dashSp = 13; m.dx = nx; m.dz = nz; AUDIO.sfx('dash'); }
+  else if (mv === 'howl') { for (let k = 0; k < 4; k++) { const a = k / 4 * Math.PI * 2; spawnEnemy('wisp', m.x + Math.cos(a) * 2.5, m.z + Math.sin(a) * 2.5); } m.buffT = 6; AUDIO.sfx('roar'); spawnRing(m.x, m.z, 7, 0xffd08a, 0.6, 0.08); }
+  else if (mv === 'slam') { if (d < 4.5 + P.r) hurtPlayer(30, 'mini'); for (const e of S.enemies) { const ed = Math.hypot(e.x - m.x, e.z - m.z); if (ed < 4.5) { e.kx += (e.x - m.x) / ed * 8; e.kz += (e.z - m.z) / ed * 8; } } spawnRing(m.x, m.z, 4.5, 0xff6a3d, 0.5, 0.1); burstParticles(m.x, 0.5, m.z, 60, [0.6, 0.6, 0.55], 7, 0.5, 0.8); camShake.amp = 0.5; camShake.t = 0.4; AUDIO.sfx('slam'); }
+  else if (mv === 'shards') { for (let k = 0; k < 8; k++) { const a = k / 8 * Math.PI * 2; S.eprojectiles.push({ x: m.x + Math.sin(a) * 1.2, z: m.z + Math.cos(a) * 1.2, vx: Math.sin(a) * 9, vz: Math.cos(a) * 9, life: 1.8, dmg: 10 }); } AUDIO.sfx('spit'); }
+  else if (mv === 'spit') { for (let k = -1; k <= 1; k++) { const a = Math.atan2(nx, nz) + k * 0.28; S.eprojectiles.push({ x: m.x + Math.sin(a) * 1.2, z: m.z + Math.cos(a) * 1.2, vx: Math.sin(a) * 10, vz: Math.cos(a) * 10, life: 1.8, dmg: 12 }); } AUDIO.sfx('spit'); }
 }
 function updateBoss(dt) {
   if (S.bossCorpse) { S.bossCorpse.t -= S.dtRaw; ANIM.w.mixer.update(S.dtRaw); if (S.bossCorpse.t <= 0) { S.bossCorpse = null; wardenRig.visible = false; } }
@@ -1528,7 +1792,7 @@ function updateBoss(dt) {
         b.phase = 'recover'; b.pt = 1.1;
         if (d < R + P.r) hurtPlayer(30, 'bossSlam');
         spawnRing(b.x, b.z, R, 0xff6a3d, 0.5, 0.1); burstParticles(b.x, 0.5, b.z, 80, [1, 0.45, 0.15], 8, 0.5, 0.8);
-        if (b.phase2) for (let i = 0; i < 3; i++) { const a = b.face + (i - 1) * 1.1; S.burns.push({ x: b.x + Math.sin(a) * 3.2, z: b.z + Math.cos(a) * 3.2, t: 4 }); }
+        if (b.phase2) for (let i = 0; i < 3; i++) { const a = b.face + (i - 1) * 1.1; S.burns.push({ x: b.x + Math.sin(a) * 3.2, z: b.z + Math.cos(a) * 3.2, t: 4, hostile: true }); }
         for (const e of S.enemies) { const ed = Math.hypot(e.x - b.x, e.z - b.z); if (ed < R) { e.kx += (e.x - b.x) / ed * 10; e.kz += (e.z - b.z) / ed * 10; } }
         camShake.amp = 0.7; camShake.t = 0.5; AUDIO.sfx('slam');
       }
@@ -1560,7 +1824,7 @@ function updateBoss(dt) {
   }
   // summon at 60% / 30%
   const frac = b.hp / b.maxHp;
-  if (!b.phase2 && frac < 0.3 && b.phase !== 'intro') {
+  if (!b.phase2 && frac < 0.3 && b.phase !== 'intro' && DIFF().phase2) {
     b.phase2 = true; b.r = 1.6; b.animOnce = 'rage';
     $('#boss .name').textContent = tr('THE ASH WARDEN · BURNING');
     showBanner('THE WARDEN BURNS BRIGHTER', 4); AUDIO.sfx('roar');
@@ -1604,13 +1868,13 @@ function updatePlayer(dt) {
   P.invuln = Math.max(0, P.invuln - dt); P.hitFlash = Math.max(0, P.hitFlash - dt);
   P.dashCd = Math.max(0, P.dashCd - dt); P.heavyCd = Math.max(0, P.heavyCd - dt); P.novaCd = Math.max(0, P.novaCd - dt);
   P.swing = Math.max(0, P.swing - dt);
-  if (P.regen > 0) P.hp = Math.min(P.maxHp, P.hp + P.regen * dt);
+  if (P.regen > 0 && !P.noRegen) P.hp = Math.min(P.maxHp, P.hp + P.regen * dt);
   const mv = moveVector();
   let sp = moveSpeed();
   let dx = mv.x, dz = mv.z;
   if (P.dashT > 0) {
     P.dashT -= dt; dx = P.dashDx; dz = P.dashDz; sp = moveSpeed() * 3.6;
-    if (P.fireTrail) { P.trailT -= dt; if (P.trailT <= 0) { P.trailT = 0.06; S.burns.push({ x: P.x, z: P.z, t: 2.5 }); } }
+    if (P.fireTrail) { P.trailT -= dt; if (P.trailT <= 0) { P.trailT = 0.06; S.burns.push({ x: P.x, z: P.z, t: 2.5 * (P.burnDur || 1) }); } }
     burstParticles(P.x, 0.4, P.z, 2, [0.55, 0.95, 0.85], 1.5, 0.3, 0.3, -1);
   }
   P.x += dx * sp * dt; P.z += dz * sp * dt;
@@ -1694,7 +1958,7 @@ function renderPickups() {
   }
   for (const k in pickupSets) pickupSets[k].end();
   boltSet.begin();
-  for (const p of S.projectiles) { _p3.set(p.x, p.y, p.z); _q.setFromAxisAngle(_up, Math.atan2(p.vx, p.vz)); _qx.setFromAxisAngle(_ax, Math.PI / 2); _q.multiply(_qx); _s3.set(0.6, 0.6, 1.4); _m4.compose(_p3, _q, _s3); boltSet.push(_m4); }
+  for (const p of S.projectiles) { _p3.set(p.x, p.y, p.z); _q.setFromAxisAngle(_up, Math.atan2(p.vx, p.vz)); _qx.setFromAxisAngle(_ax, Math.PI / 2); _q.multiply(_qx); if (p.heavy) _s3.set(0.5, 0.5, 2.6); else _s3.set(0.6, 0.6, 1.4); _m4.compose(_p3, _q, _s3); boltSet.push(_m4); }
   boltSet.end();
   spitSet.begin();
   for (const p of S.eprojectiles) { _p3.set(p.x, 0.8, p.z); _q.setFromAxisAngle(_up, S.wall * 5); _s3.setScalar(0.7); _m4.compose(_p3, _q, _s3); spitSet.push(_m4); }
@@ -1731,7 +1995,7 @@ function buildMinimapBg() {
   for (const l of world.landmarks) {
     const x = R + l.x * sc, y = R + l.z * sc;
     if (l.kind === 'house' || l.kind === 'tower') { g.fillStyle = '#f0dcc0'; g.fillRect(x - 2, y - 2, 4, 4); }
-    else if (l.kind === 'shrine') { g.fillStyle = '#ffb347'; g.beginPath(); g.arc(x, y, 3, 0, Math.PI * 2); g.fill(); }
+    else if (l.kind === 'shrine') { /* drawn live in drawMinimap */ }
   }
   mm.width = mm.height = 300;
 }
@@ -1745,6 +2009,12 @@ function drawMinimap() {
   mmCtx.fillStyle = 'rgba(255,120,80,.9)';
   for (const e of S.enemies) { mmCtx.fillRect(R + e.x * sc - 1, R + e.z * sc - 1, 2, 2); }
   if (S.boss) { mmCtx.fillStyle = '#ff4a2a'; mmCtx.beginPath(); mmCtx.arc(R + S.boss.x * sc, R + S.boss.z * sc, 5 + Math.sin(S.wall * 8) * 1.5, 0, Math.PI * 2); mmCtx.fill(); mmCtx.strokeStyle = 'rgba(255,120,80,.6)'; mmCtx.beginPath(); mmCtx.arc(R + S.boss.x * sc, R + S.boss.z * sc, 9 + Math.sin(S.wall * 4) * 3, 0, Math.PI * 2); mmCtx.stroke(); }
+  // shrines: blinking until lit, pulsing while active, solid teal when done
+  if (S.shrines) for (const k in S.shrines) { const sh = S.shrines[k]; const x = R + sh.x * sc, y = R + sh.z * sc;
+    if (sh.state === 'done') { mmCtx.fillStyle = '#8ff0dc'; mmCtx.beginPath(); mmCtx.arc(x, y, 3.5, 0, Math.PI * 2); mmCtx.fill(); }
+    else if (sh.state === 'active') { mmCtx.strokeStyle = '#ffd08a'; mmCtx.lineWidth = 2; mmCtx.beginPath(); mmCtx.arc(x, y, 5 + Math.sin(S.wall * 6) * 2, 0, Math.PI * 2); mmCtx.stroke(); }
+    else if (Math.sin(S.wall * 3) > -0.2) { mmCtx.fillStyle = '#ffb347'; mmCtx.beginPath(); mmCtx.arc(x, y, 3.5, 0, Math.PI * 2); mmCtx.fill(); } }
+  for (const m of (S.minis || [])) { if (m.burrowed) continue; mmCtx.fillStyle = '#c48aff'; mmCtx.beginPath(); mmCtx.arc(R + m.x * sc, R + m.z * sc, 4 + Math.sin(S.wall * 6) * 1.2, 0, Math.PI * 2); mmCtx.fill(); }
   // forge marker
   mmCtx.fillStyle = '#ffd08a'; mmCtx.beginPath(); mmCtx.arc(R + world.forgePos.x * sc, R + world.forgePos.z * sc, 3.5, 0, Math.PI * 2); mmCtx.fill();
   // player
@@ -1800,9 +2070,11 @@ function tick(dt) {
     updatePlayer(dt);
     updateEnemies(dt);
     updateBoss(dt);
+    updateMinis(dt);
     updateProjectiles(dt);
     updatePickups(dt);
     updateBurns(dt);
+    updateShrines(dt);
     if (!S.endless && S.t >= RUN_LENGTH && S.phase === 'run') endRun(true);
     AUDIO.setTension(S.boss ? 1 : (P.hp / P.maxHp < 0.35 ? 0.7 : (threat() >= 5 ? 0.5 : 0)));
   } else if (S.phase === 'dead' && ANIM.p) {
@@ -1885,13 +2157,13 @@ function autopilot(dt) {
     const dx = P.x - e.x, dz = P.z - e.z, d2 = dx * dx + dz * dz;
     if (d2 < 196) { const d = Math.sqrt(d2) + 0.2; fx += dx / (d2 + 1); fz += dz / (d2 + 1); if (d < 5) near5++; if (d < 3) near3++; if (d < nearest) nearest = d; }
   }
-  if (S.boss) { const dx = P.x - S.boss.x, dz = P.z - S.boss.z, d2 = dx * dx + dz * dz; if (d2 < 400) { fx += dx / (d2 + 1) * 8; fz += dz / (d2 + 1) * 8; } }
+  for (const b of bigs()) { const dx = P.x - b.x, dz = P.z - b.z, d2 = dx * dx + dz * dz; if (d2 < 400) { fx += dx / (d2 + 1) * 8; fz += dz / (d2 + 1) * 8; } }
   let len = Math.hypot(fx, fz);
   let mx = 0, mz = 0;
   A.flipT -= dt; if (A.flipT <= 0) { A.flipT = 4 + Math.random() * 4; A.side = -A.side; }
   if (len > 1e-4) {
     fx /= len; fz /= len;
-    const flee = near3 >= 4 || P.hp < P.maxHp * 0.35 || (S.boss && Math.hypot(P.x - S.boss.x, P.z - S.boss.z) < 7);
+    const flee = near3 >= 4 || P.hp < P.maxHp * 0.35 || bigs().some((b) => Math.hypot(P.x - b.x, P.z - b.z) < 7);
     if (flee) { mx = fx; mz = fz; }
     else { mx = fx * 0.35 + (-fz) * A.side; mz = fz * 0.35 + fx * A.side; }   // strafe around the crowd
   } else {
@@ -1900,6 +2172,16 @@ function autopilot(dt) {
     mx = tx - P.x; mz = tz - P.z;
   }
   const r = Math.hypot(P.x, P.z); if (r > 75) { mx -= P.x / r * (r - 75) * 0.25; mz -= P.z / r * (r - 75) * 0.25; }
+  // shrines: go light the nearest idle one when things are calm; stay inside the leash while it burns
+  if (S.shrines) {
+    const act = S.shrineActive;
+    if (act) { const d = Math.hypot(P.x - act.x, P.z - act.z); if (d > 11) { mx = (act.x - P.x) / d; mz = (act.z - P.z) / d; A.randT = 0; } else if (d > 7) { const k = (d - 7) * 0.6; mx += (act.x - P.x) / d * k; mz += (act.z - P.z) / d * k; } }
+    else if (S.t > 20 && P.hp > P.maxHp * 0.5 && near5 < 3) {
+      let best = null, bd = 1e9;
+      for (const k in S.shrines) { const sh = S.shrines[k]; if (sh.state !== 'idle' || sh.cd > 0) continue; const d = Math.hypot(P.x - sh.x, P.z - sh.z); if (d < bd) { bd = d; best = sh; } }
+      if (best) { if (bd < 3.2) lightShrine(best); else { mx += (best.x - P.x) / bd * 1.2; mz += (best.z - P.z) / bd * 1.2; } }
+    }
+  }
   // unstick
   A.stuckT += dt; A.randT -= dt;
   if (A.stuckT > 1) { if (Math.hypot(P.x - A.lastX, P.z - A.lastZ) < 1.5) { A.randT = 1.2; const a = Math.random() * 6.28; A.rx = Math.cos(a); A.rz = Math.sin(a); } A.lastX = P.x; A.lastZ = P.z; A.stuckT = 0; }
@@ -1919,7 +2201,7 @@ function autopilot(dt) {
 // =====================================================================
 window.__emberlight = {
   S, P: () => P, W, world: () => world, startRun, endRun, spawnBoss, spawnEnemy, spawnAround, setWeather: (tod, wx) => { W.tod = tod; W.wx = wx; W.auto = false; refreshWeatherButtons(); },
-  cheat: (o) => Object.assign(P, o), META, recordRun, SET, applyLang, applyQuality, gainXp, AUDIO, camDist: (v) => { camDist = v; }, PAD, pollGamepad, ANIM, clips: () => kit.clips.map((c) => c.name + ':' + c.duration.toFixed(2)), post: () => ({ ao: gtaoPass && gtaoPass.enabled, bloom: bloomPass && bloomPass.enabled, passes: composer && composer.passes.length }),
+  cheat: (o) => Object.assign(P, o), META, recordRun, SET, applyLang, applyQuality, gainXp, AUDIO, camDist: (v) => { camDist = v; }, PAD, pollGamepad, lightShrine, nearShrine, shrines: () => S.shrines, DIFFS, rollTalents, TALENTS, WEAPONS, spawnMini, MINIS, minis: () => S.minis, hurtMini, killMini, ANIM, clips: () => kit.clips.map((c) => c.name + ':' + c.duration.toFixed(2)), post: () => ({ ao: gtaoPass && gtaoPass.enabled, bloom: bloomPass && bloomPass.enabled, passes: composer && composer.passes.length }),
   project: (x, y, z) => { const v = new THREE.Vector3(x, y, z).project(camera); return { sx: (v.x * 0.5 + 0.5) * window.innerWidth, sy: (-v.y * 0.5 + 0.5) * window.innerHeight }; },
   slashes: () => S.slashes.map((m) => ({ ry: m.rotation.y, arc: m.userData.arc })), giveShards: (n) => { P.shards += n; }, teleport: (x, z) => { P.x = x; P.z = z; },
   capture: async (url) => {

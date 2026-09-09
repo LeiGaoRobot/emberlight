@@ -184,7 +184,7 @@ export class Kit {
       item.radius = Math.max(bb.max.x, -bb.min.x, bb.max.z, -bb.min.z) || 0.5;
       item.height = bb.max.y;
       this.items[name] = item;
-      if (name === 'Player' || name === 'Warden') {
+      if (name === 'Player' || name === 'Warden' || ['WolfKing', 'Sentinel', 'Salamander', 'Maw'].includes(name)) {
         // keep the hierarchy as a rig template
         node.position.set(0, 0, 0);
         node.updateMatrixWorld(true);

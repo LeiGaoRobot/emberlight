@@ -719,6 +719,106 @@ cyl("WHilt", (0, 0, 0), 0.05, 0.7, M["WardenTrim"], wbl, verts=6, rot=(math.pi /
 arc("EmberCore_WCrescent", (0, -0.8, 0), 0.7, 1.15, math.radians(195), math.radians(345), 0.06, M["EmberCore"], wbl)
 arc("WCrescentEdge", (0, -0.8, 0), 0.62, 0.72, math.radians(200), math.radians(340), 0.05, M["Bone"], wbl)
 
+# ---------------------------------------------------------------- district elites (mini-bosses), rig: M<n>_Body / M<n>_Head / M<n>_ArmL / M<n>_ArmR
+MINI = {}
+def mini_rig(n, name):
+    P = kit(name)
+    body = empty(f"M{n}_Body"); body.parent = P
+    head = empty(f"M{n}_Head"); head.parent = body
+    al = empty(f"M{n}_ArmL"); al.parent = body
+    ar = empty(f"M{n}_ArmR"); ar.parent = body
+    MINI[n] = {"body": body, "head": head, "armL": al, "armR": ar}
+    return P, body, head, al, ar
+
+M["Fur"] = mat("Fur", "#5a4a3c"); M["FurLight"] = mat("FurLight", "#8a7660"); M["Fang"] = mat("Fang", "#efe6d2")
+M["Golem"] = mat("Golem", "#6f7a72"); M["GolemDark"] = mat("GolemDark", "#4a524d")
+M["Scale"] = mat("Scale", "#3a2b2a"); M["ScaleBelly"] = mat("ScaleBelly", "#7a4a3a")
+M["Mud"] = mat("Mud", "#3f4a3a"); M["MudLight"] = mat("MudLight", "#5a6a50"); M["Gum"] = mat("Gum", "#7a2f3a")
+
+# 1. Wolf King (wildwood) — quadruped; head & jaw on the head empty, front legs on the arm empties
+P, body, head, al, ar = mini_rig(1, "WolfKing")
+ball("WKBody", (0, 0.1, 1.0), 0.75, M["Fur"], body, scale=(0.9, 1.5, 0.8), sub=1)
+ball("WKChest", (0, -0.7, 1.05), 0.55, M["FurLight"], body, scale=(1.0, 0.9, 0.9), sub=1)
+cyl("WKTail", (0, 1.25, 1.2), 0.1, 1.0, M["Fur"], body, rot=(-0.9, 0, 0), verts=6, r2=0.04)
+for sx in (-1, 1):
+    cyl(f"WKHind{sx}", (sx * 0.42, 0.7, 0.45), 0.13, 0.9, M["Fur"], body, verts=7, r2=0.09)
+    ball(f"WKPawH{sx}", (sx * 0.42, 0.62, 0.08), 0.15, M["FurLight"], body, scale=(1, 1.3, 0.6), sub=0)
+head.location = (0, -1.2, 1.25)
+ball("WKHead", (0, -0.1, 0), 0.4, M["Fur"], head, scale=(0.9, 1.1, 0.85), sub=1)
+box("WKSnout", (0, -0.55, -0.08), (0.36, 0.5, 0.3), M["FurLight"], head, bevel=0.03)
+box("WKJaw", (0, -0.5, -0.24), (0.32, 0.42, 0.1), M["Fur"], head, bevel=0.02)
+for sx in (-1, 1):
+    cone(f"WKEar{sx}", (sx * 0.22, 0.1, 0.36), 0.12, 0.35, M["Fur"], head, verts=5)
+    ball(f"EnemyEye_WK{sx}", (sx * 0.17, -0.34, 0.1), 0.06, M["EnemyEye"], head, sub=0)
+    cone(f"WKFang{sx}", (sx * 0.1, -0.72, -0.14), 0.04, 0.16, M["Fang"], head, verts=4, r2=0.0)
+for i in range(5):
+    cone(f"WKMane{i}", (-0.3 + i * 0.15, 0.25, 0.32 + (i % 2) * 0.05), 0.09, 0.4, M["FurLight"], head, verts=4, rot=(0.6, 0, 0))
+for emp, sx in ((al, -1), (ar, 1)):
+    emp.location = (sx * 0.45, -0.75, 0.95)
+    cyl("WKForeleg", (0, 0, -0.45), 0.12, 0.9, M["Fur"], emp, verts=7, r2=0.09)
+    ball("WKPaw", (0, -0.05, -0.85), 0.15, M["FurLight"], emp, scale=(1, 1.3, 0.6), sub=0)
+
+# 2. Stone Sentinel (mossfall) — stone golem
+P, body, head, al, ar = mini_rig(2, "Sentinel")
+box("SGTorso", (0, 0, 1.6), (1.5, 1.0, 1.4), M["Golem"], body, bevel=0.08)
+box("SGHips", (0, 0, 0.75), (1.1, 0.8, 0.5), M["GolemDark"], body, bevel=0.06)
+for sx in (-1, 1):
+    box(f"SGLeg{sx}", (sx * 0.4, 0, 0.3), (0.45, 0.55, 0.6), M["GolemDark"], body, bevel=0.05)
+ball("SGMoss", (0.3, -0.3, 2.1), 0.4, M["Moss"], body, scale=(1.3, 0.5, 0.6), sub=1)
+for i in range(4):
+    a = i / 4 * math.tau
+    box(f"EmberCore_SGRune{i}", (math.cos(a) * 0.55, -0.52, 1.5 + (i % 2) * 0.3), (0.2, 0.05, 0.12), M["EmberCore"], body, rot=(0, 0, a), bevel=0.0)
+head.location = (0, 0, 2.35)
+box("SGHead", (0, 0, 0.35), (0.8, 0.7, 0.7), M["Golem"], head, bevel=0.06)
+for sx in (-1, 1):
+    ball(f"EnemyEye_SG{sx}", (sx * 0.2, -0.36, 0.38), 0.08, M["EnemyEye"], head, sub=0)
+box("SGBrow", (0, -0.3, 0.6), (0.9, 0.25, 0.16), M["GolemDark"], head, bevel=0.03)
+for emp, sx in ((al, -1), (ar, 1)):
+    emp.location = (sx * 1.0, 0, 2.1)
+    box("SGArm", (sx * 0.1, 0, -0.6), (0.5, 0.5, 1.2), M["Golem"], emp, bevel=0.06)
+    box("SGFist", (sx * 0.1, -0.05, -1.35), (0.65, 0.6, 0.5), M["GolemDark"], emp, bevel=0.06)
+
+# 3. Salamander (cinder) — long low lizard with an ember crest
+P, body, head, al, ar = mini_rig(3, "Salamander")
+ball("SLBody", (0, 0.2, 0.55), 0.6, M["Scale"], body, scale=(1.0, 2.2, 0.7), sub=1)
+ball("SLBelly", (0, 0.2, 0.4), 0.5, M["ScaleBelly"], body, scale=(0.9, 2.0, 0.5), sub=1)
+cyl("SLTail", (0, 1.9, 0.5), 0.22, 1.6, M["Scale"], body, rot=(math.pi / 2, 0, 0), verts=7, r2=0.05)
+for i in range(6):
+    cone(f"EmberCore_SLCrest{i}", (0, -0.6 + i * 0.4, 0.95), 0.1, 0.35 + (i % 2) * 0.1, M["EmberCore"], body, verts=4, rot=(0.3, 0, 0))
+for sx in (-1, 1):
+    cyl(f"SLHind{sx}", (sx * 0.6, 0.8, 0.28), 0.12, 0.55, M["Scale"], body, rot=(0, sx * 0.7, 0), verts=6)
+    ball(f"SLFootH{sx}", (sx * 0.8, 0.85, 0.06), 0.14, M["ScaleBelly"], body, scale=(1.2, 1, 0.5), sub=0)
+head.location = (0, -1.25, 0.6)
+ball("SLHead", (0, -0.15, 0), 0.38, M["Scale"], head, scale=(0.9, 1.3, 0.7), sub=1)
+box("SLJaw", (0, -0.45, -0.15), (0.5, 0.5, 0.12), M["ScaleBelly"], head, bevel=0.02)
+ball("EmberCore_SLThroat", (0, -0.2, -0.05), 0.2, M["EmberCore"], head, scale=(1, 1.2, 0.6), sub=0)
+for sx in (-1, 1):
+    ball(f"EnemyEye_SL{sx}", (sx * 0.22, -0.25, 0.2), 0.07, M["EnemyEye"], head, sub=0)
+for emp, sx in ((al, -1), (ar, 1)):
+    emp.location = (sx * 0.62, -0.6, 0.5)
+    cyl("SLForeleg", (sx * 0.15, 0, -0.22), 0.12, 0.55, M["Scale"], emp, rot=(0, sx * 0.7, 0), verts=6)
+    ball("SLFoot", (sx * 0.3, 0, -0.44), 0.14, M["ScaleBelly"], emp, scale=(1.2, 1, 0.5), sub=0)
+
+# 4. Maw (silvermere) — mud blob with a huge mouth; "arms" are the two mud tendrils
+P, body, head, al, ar = mini_rig(4, "Maw")
+ball("MWBody", (0, 0, 0.7), 1.1, M["Mud"], body, scale=(1.2, 1.1, 0.75), sub=1)
+ball("MWBump", (0.5, 0.4, 1.2), 0.45, M["MudLight"], body, sub=1)
+ball("MWBump2", (-0.6, 0.2, 1.1), 0.35, M["MudLight"], body, sub=1)
+for i in range(6):
+    a = i / 6 * math.tau
+    ball(f"MWDrip{i}", (math.cos(a) * 1.15, math.sin(a) * 1.05, 0.12), 0.22, M["Mud"], body, scale=(1.3, 1.3, 0.5), sub=0)
+head.location = (0, -0.75, 0.95)
+ball("MWMouthTop", (0, -0.1, 0.15), 0.62, M["Mud"], head, scale=(1.2, 0.8, 0.5), sub=1)
+ball("MWGum", (0, -0.2, 0.0), 0.5, M["Gum"], head, scale=(1.1, 0.8, 0.35), sub=1)
+for i in range(7):
+    cone(f"MWTooth{i}", (-0.45 + i * 0.15, -0.55, 0.05), 0.05, 0.22, M["Fang"], head, verts=4, rot=(math.pi, 0, 0))
+for sx in (-1, 1):
+    ball(f"EnemyEye_MW{sx}", (sx * 0.35, -0.2, 0.45), 0.09, M["EnemyEye"], head, sub=0)
+for emp, sx in ((al, -1), (ar, 1)):
+    emp.location = (sx * 1.0, -0.3, 0.9)
+    cyl("MWTendril", (sx * 0.3, -0.3, 0.3), 0.16, 1.1, M["MudLight"], emp, rot=(0.5, sx * 0.6, 0), verts=7, r2=0.06)
+    ball("MWTendrilTip", (sx * 0.62, -0.62, 0.7), 0.14, M["Mud"], emp, sub=0)
+
 # ---------------------------------------------------------------- animations (keyframes on the rig empties, one NLA track per clip)
 # Every clip starts from the rest pose at frame 0 so the web side can play the one-shots additively.
 scene.render.fps = 24
@@ -884,6 +984,39 @@ clip("W_death", RIG_W, 40, {
     "armR": {0: R(), 10: R(-2.2, 0, -0.7), 24: R(0.9, 0, -1.0), 40: R(0.9, 0, -1.0)},
     "head": {0: R(), 10: R(-0.6), 24: R(0.7), 40: R(0.7)},
 }, loop=False)
+# ---- district elites: the same four clips for each rig (unique names per rig, exporter merges by track name)
+for n, rig in MINI.items():
+    pre = f"M{n}_"
+    clip(pre + "idle", rig, 60, {
+        "body": {0: RL(), 30: RL((0.03, 0, 0), (0, 0, 0.08))},
+        "head": {0: R(), 20: R(0.05, 0.25, 0), 45: R(-0.05, -0.2, 0)},
+        "armL": {0: R(-0.1), 30: R(-0.3, 0, 0.1)},
+        "armR": {0: R(-0.1), 30: R(-0.3, 0, -0.1)},
+    })
+    clip(pre + "walk", rig, 24, {
+        "body": {0: RL((0.08, 0, 0.05), (0, 0, 0)), 6: RL((0.08, 0, 0), (0, 0, 0.14)), 12: RL((0.08, 0, -0.05), (0, 0, 0)), 18: RL((0.08, 0, 0), (0, 0, 0.14))},
+        "head": {0: R(0.05), 12: R(-0.05)},
+        "armL": {0: R(0.6), 12: R(-0.6)},
+        "armR": {0: R(-0.6), 12: R(0.6)},
+    })
+    clip(pre + "attack", rig, 16, {
+        "body": {0: RL(), 4: RL((-0.25, 0, 0), (0, 0.3, 0.1)), 8: RL((0.45, 0, 0), (0, -0.5, -0.1)), 16: RL()},
+        "head": {0: R(), 4: R(-0.5), 8: R(0.5), 16: R()},
+        "armL": {0: R(), 4: R(-1.6, 0, 0.4), 8: R(0.9, 0, 0.2), 16: R()},
+        "armR": {0: R(), 4: R(-1.6, 0, -0.4), 8: R(0.9, 0, -0.2), 16: R()},
+    }, loop=False)
+    clip(pre + "special", rig, 30, {
+        "body": {0: RL(), 10: RL((-0.3, 0, 0), (0, 0, 0.5)), 20: RL((-0.3, 0, 0.2), (0, 0, 0.5)), 30: RL()},
+        "head": {0: R(), 10: R(-0.7), 20: R(-0.7, 0.3, 0), 30: R()},
+        "armL": {0: R(), 10: R(-2.6, 0, 0.7), 20: R(-2.7, 0, 0.9), 30: R()},
+        "armR": {0: R(), 10: R(-2.6, 0, -0.7), 20: R(-2.7, 0, -0.9), 30: R()},
+    }, loop=False)
+    clip(pre + "death", rig, 32, {
+        "body": {0: RL(), 8: RL((-0.25, 0, 0), (0, 0.2, 0.3)), 20: RL((1.25, 0, 0.2), (0, -0.5, 0.5)), 32: RL((1.25, 0, 0.2), (0, -0.5, 0.5))},
+        "head": {0: R(), 8: R(-0.5), 20: R(0.6), 32: R(0.6)},
+        "armL": {0: R(), 8: R(-1.8, 0, 0.6), 20: R(0.8, 0, 0.9), 32: R(0.8, 0, 0.9)},
+        "armR": {0: R(), 8: R(-1.8, 0, -0.6), 20: R(0.8, 0, -0.9), 32: R(0.8, 0, -0.9)},
+    }, loop=False)
 scene.frame_set(0)
 
 # ---------------------------------------------------------------- preview render (kit lineup)
