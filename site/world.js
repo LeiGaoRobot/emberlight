@@ -165,7 +165,7 @@ export class Kit {
       if (!node.name.startsWith('Kit_')) continue;
       const name = node.name.slice(4);
       const inv = new THREE.Matrix4().copy(node.matrixWorld).invert();
-      const body = [], snow = [], glow = {};
+      const body = [], snow = [], glow = {}, legsL = [], legsR = [];
       node.traverse((m) => {
         if (!m.isMesh) return;
         if (/^LPCage/.test(m.name)) return;   // the iron cage fully enclosed the lantern glow
@@ -173,9 +173,11 @@ export class Kit {
         const isGlow = GLOW_MATS.has(mn) || /^(EmberCore|EnemyEye|Crystal|HotMetal|Fire|PlayerLamp)_/.test(m.name);
         if (isGlow) { (glow[mn] = glow[mn] || []).push(bakeGeo(m, inv, true)); }
         else if (m.name.startsWith('Snow_')) snow.push(bakeGeo(m, inv, false));
+        else if (name === 'Crawler' && /^Leg2?-1/.test(m.name)) legsL.push(bakeGeo(m, inv, false));
+        else if (name === 'Crawler' && /^Leg2?1/.test(m.name)) legsR.push(bakeGeo(m, inv, false));
         else body.push(bakeGeo(m, inv, false));
       });
-      const item = { name, body: mergeOrNull(body), snow: mergeOrNull(snow), glow: {} };
+      const item = { name, body: mergeOrNull(body), snow: mergeOrNull(snow), glow: {}, legsL: mergeOrNull(legsL), legsR: mergeOrNull(legsR) };
       for (const k of Object.keys(glow)) item.glow[k] = mergeOrNull(glow[k]);
       const bb = new THREE.Box3();
       if (item.body) bb.union(item.body.boundingBox);
@@ -305,19 +307,25 @@ export class DynSet {
     }
     const glows = Object.keys(item.glow).map((k) => item.glow[k]);
     this.glow = glows.length ? mk(mergeOrNull(glows), opts.glowMat || glowMat(opts.glowKey || name), false) : null;
+    // optional animated sub-parts (crawler legs): same material as the body, own matrix per instance
+    this.legsL = item.legsL ? mk(item.legsL, this.body ? this.body.material : MATS.body, opts.cast !== false) : null;
+    this.legsR = item.legsR ? mk(item.legsR, this.body ? this.body.material : MATS.body, opts.cast !== false) : null;
     this.item = item;
   }
   begin() { this.count = 0; }
-  push(m, color, glowColor) {
+  push(m, color, glowColor, mL, mR) {
     if (this.count >= this.max) return;
     const i = this.count++;
     if (this.body) { this.body.setMatrixAt(i, m); if (color) this.body.setColorAt(i, color); }
+    if (this.legsL) { this.legsL.setMatrixAt(i, mL || m); if (color) this.legsL.setColorAt(i, color); }
+    if (this.legsR) { this.legsR.setMatrixAt(i, mR || m); if (color) this.legsR.setColorAt(i, color); }
     if (this.outline) { _om.multiplyMatrices(m, this.outlineLocal); this.outline.setMatrixAt(i, _om); }
     if (this.glow) { this.glow.setMatrixAt(i, m); if (glowColor) this.glow.setColorAt(i, glowColor); }
   }
   end() {
     if (this.body) { this.body.count = this.count; this.body.instanceMatrix.needsUpdate = true; if (this.body.instanceColor) this.body.instanceColor.needsUpdate = true; }
     if (this.outline) { this.outline.count = this.count; this.outline.instanceMatrix.needsUpdate = true; }
+    for (const L of [this.legsL, this.legsR]) if (L) { L.count = this.count; L.instanceMatrix.needsUpdate = true; if (L.instanceColor) L.instanceColor.needsUpdate = true; }
     if (this.glow) { this.glow.count = this.count; this.glow.instanceMatrix.needsUpdate = true; if (this.glow.instanceColor) this.glow.instanceColor.needsUpdate = true; }
   }
 }

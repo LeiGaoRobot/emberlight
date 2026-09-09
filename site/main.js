@@ -8,8 +8,8 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
-import { Kit, DynSet, buildGround, generateMap, districtAt, DISTRICTS, ROADS, ISLAND_R, PLAY_R, collideStatic, Grid, setGlow, MATS, treeUniforms, mulberry32, vnoise } from './world.js?v=26';
-import * as AUDIO from './audio.js?v=26';
+import { Kit, DynSet, buildGround, generateMap, districtAt, DISTRICTS, ROADS, ISLAND_R, PLAY_R, collideStatic, Grid, setGlow, glowMat, MATS, treeUniforms, mulberry32, vnoise } from './world.js?v=32';
+import * as AUDIO from './audio.js?v=32';
 
 const $ = (s) => document.querySelector(s);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -20,7 +20,7 @@ const RUN_LENGTH = 600;      // 10 minutes
 const DIFFS = {
   calm:     { name: 'Calm',     zh: '静谧', dmg: 0.7,  spawn: 0.8,  hp: 0.9,  speed: 0.95, elite: 1.3, bossAt: 480, phase2: false, desc: 'Enemies hit 30% softer, the Warden never rages.', zhDesc: '敌人伤害 −30%,守卫没有二阶段。' },
   standard: { name: 'Standard', zh: '标准', dmg: 1.0,  spawn: 1.0,  hp: 1.0,  speed: 1.0,  elite: 1.0, bossAt: 480, phase2: true,  desc: 'The valley as intended. Warden at eight minutes.', zhDesc: '标准体验,守卫八分钟登场。' },
-  ash:      { name: 'Ash',      zh: '灰烬', dmg: 1.5,  spawn: 1.8,  hp: 1.3,  speed: 1.15, elite: 0.6, bossAt: 360, phase2: true,  desc: '80% more creatures, faster and 50% harder hits, Warden at six.', zhDesc: '刷怪 +80%、更快、伤害 +50%,守卫六分钟登场。' },
+  ash:      { name: 'Ash',      zh: '灰烬', dmg: 1.6,  spawn: 2.1,  hp: 1.35, speed: 1.2,  elite: 0.55, bossAt: 360, phase2: true,  desc: 'Twice the creatures, faster, 60% harder hits, Warden at six.', zhDesc: '刷怪翻倍、更快、伤害 +60%,守卫六分钟登场。' },
 };
 const DIFF = () => DIFFS[SET.difficulty] || DIFFS.standard;
 const BOSS_AT_FN = () => DIFF().bossAt;
@@ -130,7 +130,7 @@ const ETYPES = {
   wisp:    { hp: 14,  dmg: 4,  speed: 6.0, r: 0.35, xp: 1, kit: 'Wisp',    shards: 0.12, mass: 0.6 },
   cinder:  { hp: 34,  dmg: 7, speed: 3.3, r: 0.5,  xp: 2, kit: 'Cinder',  shards: 0.3,  mass: 1.0 },
   crawler: { hp: 26,  dmg: 6,  speed: 4.4, r: 0.5,  xp: 2, kit: 'Crawler', shards: 0.25, mass: 0.8, lunge: true },
-  spitter: { hp: 46,  dmg: 7,  speed: 2.6, r: 0.55, xp: 3, kit: 'Spitter', shards: 0.5,  mass: 1.2, ranged: true },
+  spitter: { hp: 46,  dmg: 6,  speed: 2.6, r: 0.55, xp: 3, kit: 'Spitter', shards: 0.5,  mass: 1.2, ranged: true },
   brute:   { hp: 300, dmg: 16, speed: 2.5, r: 0.95, xp: 12, kit: 'Brute',  shards: 5,    mass: 4.0, elite: true },
 };
 const TALENTS = [
@@ -207,13 +207,14 @@ let P = newPlayer();
 // settings (persisted) + translations
 // =====================================================================
 const SET_V = 1, META_V = 1;
-const SET = Object.assign({ v: SET_V, quality: 'high', shake: true, numbers: true, music: 0.28, sfx: 0.55, lang: 'en', difficulty: 'standard', startWeapon: 0 }, (() => {
+const SET = Object.assign({ v: SET_V, quality: 'high', shake: true, numbers: true, music: 0.28, sfx: 0.55, lang: 'en', difficulty: 'standard', startWeapon: 0, cues: false }, (() => {
   try {
     const raw = JSON.parse(localStorage.getItem('emberlight.settings') || '{}');
     if (typeof raw !== 'object' || raw === null) return {};
     // migrations by version: v0 (no field) → v1: clamp volumes, drop unknown keys
     const out = {};
-    for (const k of ['quality', 'shake', 'numbers', 'music', 'sfx', 'lang', 'difficulty', 'startWeapon']) if (k in raw) out[k] = raw[k];
+    for (const k of ['quality', 'shake', 'numbers', 'music', 'sfx', 'lang', 'difficulty', 'startWeapon', 'cues']) if (k in raw) out[k] = raw[k];
+    out.cues = !!out.cues;
     if (!['calm', 'standard', 'ash'].includes(out.difficulty)) delete out.difficulty;
     if (!Number.isInteger(out.startWeapon)) delete out.startWeapon;
     if (typeof out.music === 'number') out.music = Math.min(0.5, Math.max(0, out.music)); else delete out.music;
@@ -311,7 +312,7 @@ const HTML_ZH = {
   '#pause h2': '已暂停', '#pause .modal > .sub': '荒野在等你。', '#resumeBtn': '继续 &nbsp;(Esc)', '#quitBtn': '返回标题', '#diagBtn': '复制诊断信息',
   '#endSecondary': '返回标题',
   '#weather .label': '活着的山谷', '#swapBtn': '<b>Q</b> 切换武器', '#forgeHint': '<b>F</b> 进入铁匠铺', '#pauseBtn': '暂停',
-  '#dashText b': '空格', '#settingsTitle': '设置', '#diffLabel': '难度', '#weaponLabel': '起手武器', '#shrineHint': '<b>F</b> 点亮神龛', '#setQuality .k': '画质', '#setShake .k': '屏幕抖动', '#setNumbers .k': '伤害数字', '#setMusic .k': '音乐', '#setSfx .k': '音效', '#setLang .k': '语言 / Language',
+  '#dashText b': '空格', '#settingsTitle': '设置', '#diffLabel': '难度', '#weaponLabel': '起手武器', '#shrineHint': '<b>F</b> 点亮神龛', '#setQuality .k': '画质', '#setShake .k': '屏幕抖动', '#setNumbers .k': '伤害数字', '#setMusic .k': '音乐', '#setSfx .k': '音效', '#setLang .k': '语言 / Language', '#setCues .k': '色弱辅助(形状与色差)', '#deathReviewLabel': '复盘',
   '#about h2': '关于 Emberlight',
 };
 const HTML_EN = {};
@@ -336,6 +337,14 @@ function renderSettings() {
   $('#setMusic input').value = Math.round(SET.music / 0.5 * 100);
   $('#setSfx input').value = Math.round(SET.sfx / 0.8 * 100);
   $('#setLang .v').textContent = SET.lang === 'zh' ? '中文' : 'English';
+  $('#setCues .v').textContent = SET.cues ? (SET.lang === 'zh' ? '开' : 'On') : (SET.lang === 'zh' ? '关' : 'Off');
+}
+function applyCues() {
+  const on = !!SET.cues;
+  const set = (name, hex) => { const m = glowMat(name); m.vertexColors = !on; if (on) m.color.setHex(hex); else m.color.setScalar(1); m.needsUpdate = true; };
+  set('Crystal', 0xffffff); set('ShardCrystal', 0xffe066); set('HeartGlow', 0xff5ad6); set('EnemyGlow', 0xffffff);
+  if (!on) { setGlow('Crystal', 1.4); setGlow('ShardCrystal', 1.5); setGlow('HeartGlow', 1.5); setGlow('EnemyGlow', 2.2); }
+  S.cues = on;
 }
 function applyQuality() {
   const low = SET.quality === 'low';
@@ -352,6 +361,29 @@ function applyQuality() {
 // =====================================================================
 // the Ember Archive: persistent stats + unlocks
 // =====================================================================
+// first-run guide: four cards, each dismissed by doing the thing (or after 25 s)
+const GUIDE = [
+  { key: 'move', text: 'Move with WASD', zh: '用 WASD 移动', touch: 'Drag the left half of the screen to move', touchZh: '拖动屏幕左半边移动', pad: 'Move with the left stick', padZh: '左摇杆移动', done: () => (S.guideMoved || 0) > 4 },
+  { key: 'attack', text: 'Your blade swings on its own. Keep enemies in front of you.', zh: '刀会自己挥。把敌人放在身前。', done: () => S.stats.kills >= 3 },
+  { key: 'ember', text: 'Cyan embers are experience. Walk over them to level up.', zh: '青色余烬是经验,走过去拾取升级。', done: () => (P.xpTotal || 0) >= 5 },
+  { key: 'forge', text: 'The forge in the village reworks your weapons. Press F beside it.', zh: '村里的铁匠铺能重锻武器,走到旁边按 F。', touch: 'The forge in the village reworks your weapons. Tap Forge beside it.', touchZh: '村里的铁匠铺能重锻武器,走到旁边点"锻造"。', pad: 'The forge in the village reworks your weapons. Press LB beside it.', padZh: '村里的铁匠铺能重锻武器,走到旁边按 LB。', done: () => S.forgeOpened || P.shards >= 8 },
+];
+function guideText(g) {
+  const zh = SET.lang === 'zh';
+  if (S.touch) return zh ? (g.touchZh || g.zh) : (g.touch || g.text);
+  if (PAD.on) return zh ? (g.padZh || g.zh) : (g.pad || g.text);
+  return zh ? g.zh : g.text;
+}
+function updateGuide(dt) {
+  const G = S.guide; if (!G) return;
+  const el = $('#guide');
+  if (G.step >= GUIDE.length) { el.classList.remove('show'); META.guided = true; saveMeta(); S.guide = null; return; }
+  const g = GUIDE[G.step];
+  G.t += dt;
+  if (!G.shown) { el.textContent = guideText(g); el.classList.add('show'); G.shown = true; G.t = 0; }
+  if ((G.t > 1.5 && g.done()) || G.t > 25) { G.step++; G.shown = false; el.classList.remove('show'); G.gap = 0.8; }
+  if (G.gap > 0) { G.gap -= dt; if (G.gap > 0) return; }
+}
 const UNLOCKS = [
   { key: 'fourth', name: 'Wide horizon', how: 'Survive 5 minutes in one run', gives: 'Level-ups offer four talents instead of three', test: (m, run) => run && run.time >= 300 },
   { key: 'tithe', name: "Smith's tithe", how: 'Defeat the Ash Warden', gives: 'Every run starts with 10 forge shards', test: (m, run) => m.bossKills > 0 },
@@ -368,6 +400,7 @@ function loadMeta() {
     out.runs = Array.isArray(m.runs) ? m.runs.filter((r) => r && Number.isFinite(r.time)).map((r) => ({ time: Math.floor(r.time), kills: r.kills | 0, level: r.level | 0, won: !!r.won, boss: !!r.boss, date: String(r.date || ''), diff: ['calm', 'standard', 'ash'].includes(r.diff) ? r.diff : 'standard', shrines: r.shrines | 0 })).slice(0, 5) : [];
     out.bestiary = {}; if (m.bestiary && typeof m.bestiary === 'object') for (const k of ['wolfking', 'sentinel', 'salamander', 'maw']) if (m.bestiary[k]) out.bestiary[k] = String(m.bestiary[k]);
     out.byDiff = {}; if (m.byDiff && typeof m.byDiff === 'object') for (const k of ['calm', 'standard', 'ash']) if (m.byDiff[k]) out.byDiff[k] = { best: m.byDiff[k].best | 0, wins: m.byDiff[k].wins | 0, runs: m.byDiff[k].runs | 0 };
+    out.guided = !!m.guided;
     out.unlocks = {};
     if (m.unlocks && typeof m.unlocks === 'object') for (const u of UNLOCKS) if (m.unlocks[u.key]) out.unlocks[u.key] = m.unlocks[u.key];
     out.v = META_V;
@@ -440,7 +473,7 @@ function buildWorld() {
   for (const k of Object.keys(ETYPES)) enemySets[k] = new DynSet(kit, ETYPES[k].kit, k === 'brute' ? 40 : 320, scene, { glowKey: 'EnemyGlow', outline: 1.07 });
   pickupSets.ember = new DynSet(kit, 'Ember', 600, scene, { cast: false, glowKey: 'Crystal' });
   pickupSets.shard = new DynSet(kit, 'Shard', 200, scene, { cast: false, glowKey: 'ShardCrystal' });
-  pickupSets.heart = new DynSet(kit, 'Heart', 40, scene, { cast: false, glowKey: 'EmberCore' });
+  pickupSets.heart = new DynSet(kit, 'Heart', 40, scene, { cast: false, glowKey: 'HeartGlow' });
   boltSet = new DynSet(kit, 'Ember', 200, scene, { cast: false, glowKey: 'Bolt', glowMat: new THREE.MeshBasicMaterial({ color: 0xffb060, toneMapped: false }) });
   spitSet = new DynSet(kit, 'Ember', 120, scene, { cast: false, glowKey: 'Spit', glowMat: new THREE.MeshBasicMaterial({ color: 0xff5a2a, toneMapped: false }) });
   setGlow('EnemyGlow', 2.2);
@@ -452,7 +485,7 @@ function buildWorld() {
   setTimeout(() => { $('#loading').style.display = 'none'; }, 250);
   S.phase = 'title';
   document.body.classList.add('title');
-  applyQuality(); applyLang();
+  applyQuality(); applyCues(); applyLang();
   refreshTitleBest();
   setupTouch();
   applyWeatherInstant();
@@ -674,7 +707,7 @@ function showNumber(x, y, z, text, cls = '') {
   d.el.textContent = text; d.el.className = 'dmg ' + cls; d.el.style.display = 'block';
   d.t = 0; d.x = x + (Math.random() - 0.5) * 0.6; d.y = y; d.z = z;
 }
-const _v = new THREE.Vector3();
+const _v = new THREE.Vector3(), _lampV = new THREE.Vector3();
 function updateNumbers(dt) {
   for (const d of DMG_POOL) {
     if (d.t >= 1) { if (d.el.style.display !== 'none') d.el.style.display = 'none'; continue; }
@@ -754,7 +787,7 @@ function applyWeather() {
   sun.color.copy(c.sunC); sun.intensity = c.sunI + W.lightning * 4;
   renderer.toneMappingExposure = c.exposure;
   setGlow('WindowGlass', 0.35 + c.glowWin); setGlow('Lantern', 0.4 + c.glowLamp); setGlow('Fire', 1.6); setGlow('HotMetal', 1.4);
-  setGlow('EmberCore', 1.5); setGlow('Crystal', 1.4); setGlow('ShardCrystal', 1.5); setGlow('PlayerLamp', 1.2 + c.lamp * 0.3);
+  setGlow('EmberCore', 1.5); setGlow('PlayerLamp', 1.2 + c.lamp * 0.3); if (!S.cues) { setGlow('Crystal', 1.4); setGlow('ShardCrystal', 1.5); setGlow('HeartGlow', 1.5); }
   MATS.snow.opacity = c.snow;
   if ((c.snow > 0.01) !== S.snowVisible) { S.snowVisible = c.snow > 0.01; for (const k in world.sets) for (const m of world.sets[k].meshes) if (m.isSnow) m.visible = S.snowVisible; }
   ground.uniforms.uSnow.value = c.snow; ground.uniforms.uCloud.value = c.cloud; ground.uniforms.uWet.value = c.wet;
@@ -762,10 +795,12 @@ function applyWeather() {
   MATS.body.color.setRGB(1 - c.snow * 0.08, 1 - c.snow * 0.05, 1 + c.snow * 0.06); MATS.tree.color.copy(MATS.body.color);
   scene.environmentIntensity = 0.06 + 0.34 * clamp(c.sunI / 2, 0, 1);
   lampLight.intensity = c.lamp * 2.2;
+  S.nightK = clamp(c.lamp / 4.5, 0, 1);
   forgeLight.intensity = 2.5 + c.lamp;
   FX.rain.material.opacity = c.rain * 0.55;
   FX.snow.material.opacity = c.snow * 0.9;
-  $('#flash').style.opacity = String(W.lightning * 0.5);
+  S.novaFlash = Math.max(0, (S.novaFlash || 0) - 0.02);
+  $('#flash').style.opacity = String(Math.max(W.lightning * 0.5, S.novaFlash));
 }
 function updatePrecip(dt) {
   const c = W.cur;
@@ -963,13 +998,14 @@ $('#forgeClose').addEventListener('click', () => closeForge());
 $('#forgeRest').addEventListener('click', () => forgeRest());
 $('#endPrimary').addEventListener('click', () => { if (S.phase === 'won') goEndless(); else startRun(); });
 $('#endSecondary').addEventListener('click', () => backToTitle());
-for (const [id, key] of [['setQuality', 'quality'], ['setShake', 'shake'], ['setNumbers', 'numbers'], ['setLang', 'lang']]) {
+for (const [id, key] of [['setQuality', 'quality'], ['setShake', 'shake'], ['setNumbers', 'numbers'], ['setLang', 'lang'], ['setCues', 'cues']]) {
   $('#' + id + ' .btn').addEventListener('click', () => {
     if (key === 'quality') SET.quality = SET.quality === 'high' ? 'low' : 'high';
     else if (key === 'lang') SET.lang = SET.lang === 'zh' ? 'en' : 'zh';
     else SET[key] = !SET[key];
     saveSettings(); AUDIO.sfx('ui');
     if (key === 'quality') applyQuality();
+    if (key === 'cues') applyCues();
     if (key === 'lang') applyLang(); else renderSettings();
   });
 }
@@ -1025,6 +1061,8 @@ function startRun() {
   initShrines(); $('#shrine').classList.remove('show'); $('#shrineHint').classList.remove('show');
   W.tod = 'day'; W.wx = 'clear'; W.auto = true; W.wxTimer = 60 + Math.random() * 30; applyWeatherInstant();
   S.bossKilled = false;
+  S.guide = META.guided ? null : { step: 0, t: 0, shown: false, gap: 0 }; S.guideMoved = 0; S.forgeOpened = false; $('#guide').classList.remove('show');
+  S.hpHist = []; S.lastHits = [];
   if (ANIM.p) { for (const k in ANIM.p.actions) if (!['idle', 'walk'].includes(k)) ANIM.p.actions[k].stop(); }
   if (ANIM.w) { for (const k in ANIM.w.actions) if (!['idle', 'walk', 'charge'].includes(k)) ANIM.w.actions[k].stop(); }
   S.bossCorpse = null;
@@ -1061,6 +1099,7 @@ function endRun(won) {
   $('#endTitle').textContent = tr(won ? 'Dawn breaks over the wildwood.' : 'The light went out.');
   $('#endSub').textContent = won ? tr('Ten minutes, and the valley is still here. Keep going — it only gets wilder.') : `${tr('You kept the light for')} ${fmtTime(S.t)}.`;
   $('#endStats').innerHTML = statRows();
+  renderDeathReview(won);
   $('#endPrimary').textContent = tr(won ? 'Go endless  →' : 'Try again');
   $('#end').classList.add('show');
   AUDIO.sfx(won ? 'win' : 'lose');
@@ -1068,6 +1107,37 @@ function endRun(won) {
 }
 function goEndless() { S.endless = true; S.phase = 'run'; S.paused = false; S.modal = null; $('#end').classList.remove('show'); showBanner('ENDLESS  ·  The wildwood does not end. Neither do you.', 5); }
 function refreshTitleBest() { const el = $('#titleBest'); if (el) el.textContent = S.best.time > 0 ? (SET.lang === 'zh' ? `最佳战绩 ${fmtTime(S.best.time)} · 击败 ${S.best.kills}` : `Best run ${fmtTime(S.best.time)} · ${S.best.kills} defeated`) : (SET.lang === 'zh' ? '还没有记录。山谷在等你。' : 'No run yet. The valley is waiting.'); }
+const SRC_NAMES = { wisp: 'an ash wisp', cinder: 'a cinder', crawler: 'a crawler', spitter: 'a spitter', spit: "a spitter's bolt", brute: 'an ash brute', boss: 'the Ash Warden', bossSlam: "the Ash Warden's slam", bossCharge: "the Ash Warden's charge", burn: 'burning ground', mini: 'a district elite', other: 'the dark' };
+const SRC_ZH = { wisp: '灰烬鬼火', cinder: '灰烬', crawler: '爬行者', spitter: '吐火者', spit: '吐火者的火弹', brute: '灰烬蛮兽', boss: '灰烬守卫', bossSlam: '灰烬守卫的砸地', bossCharge: '灰烬守卫的冲锋', burn: '燃烧的地面', mini: '区域精英', other: '黑暗' };
+function renderDeathReview(won) {
+  const box = $('#deathReview'); box.style.display = won ? 'none' : 'block';
+  if (won) return;
+  const zh = SET.lang === 'zh';
+  const last = S.lastHits[S.lastHits.length - 1];
+  let line = '';
+  if (last) {
+    const nth = Math.max(1, S.lastHits.filter((h) => h.src === last.src && S.t - h.t < 10).length);
+    const who = zh ? SRC_ZH[last.src] || SRC_ZH.other : SRC_NAMES[last.src] || SRC_NAMES.other;
+    line = zh ? `你死于${who}的第 ${nth} 次攻击(${last.dmg} 伤害)。` : `You died to ${who} — its ${nth}${nth === 1 ? 'st' : nth === 2 ? 'nd' : nth === 3 ? 'rd' : 'th'} hit in ten seconds (${last.dmg} damage).`;
+  }
+  const tot = {}; for (const h of S.lastHits) if (S.t - h.t < 10) tot[h.src] = (tot[h.src] || 0) + h.dmg;
+  const top = Object.entries(tot).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${zh ? SRC_ZH[k] || k : SRC_NAMES[k] || k} ${v}`).join(' · ');
+  $('#deathLine').textContent = line;
+  $('#deathTop').textContent = top ? (zh ? '最后十秒伤害来源:' : 'Damage in the last ten seconds: ') + top : '';
+  // curve: hp over the last 12 s with hit markers
+  const cv = $('#deathCurve'); const g = cv.getContext('2d'); const W2 = cv.width, H2 = cv.height;
+  g.clearRect(0, 0, W2, H2);
+  const hist = S.hpHist; if (!hist.length) return;
+  const t1 = S.t, t0 = t1 - 12; const mx = Math.max(P.maxHp, 1);
+  g.strokeStyle = 'rgba(255,255,255,.08)'; g.lineWidth = 1; for (let i = 1; i < 4; i++) { g.beginPath(); g.moveTo(0, H2 * i / 4); g.lineTo(W2, H2 * i / 4); g.stroke(); }
+  g.beginPath(); g.strokeStyle = '#f7c39a'; g.lineWidth = 2;
+  let first = true;
+  for (const [t, hp] of hist) { if (t < t0) continue; const x = (t - t0) / 12 * W2, y = H2 - clamp(hp / mx, 0, 1) * (H2 - 4) - 2; if (first) { g.moveTo(x, y); first = false; } else g.lineTo(x, y); }
+  g.lineTo(W2, H2 - 2); g.stroke();
+  g.fillStyle = 'rgba(255,90,70,.9)';
+  for (const h of S.lastHits) { if (h.t < t0) continue; const x = (h.t - t0) / 12 * W2; g.fillRect(x - 1, 0, 2, H2); }
+  g.fillStyle = 'rgba(243,236,223,.55)'; g.font = '10px "Source Sans 3", system-ui, sans-serif'; g.fillText(zh ? '−12 s' : '−12 s', 2, 10); g.fillText(zh ? '死亡' : 'death', W2 - 32, 10);
+}
 function saveBest() {
   if (S.t > S.best.time || (S.t === S.best.time && S.stats.kills > S.best.kills)) {
     S.best = { time: Math.floor(S.t), kills: S.stats.kills };
@@ -1133,7 +1203,7 @@ function tryDash() {
   let dx = 0, dz = 0;
   const mv = moveVector();
   if (mv.len > 0.1) { dx = mv.x; dz = mv.z; } else { dx = Math.sin(P.facing); dz = Math.cos(P.facing); }
-  P.dashDx = dx; P.dashDz = dz; P.dashT = 0.22 * (P.dashLen || 1); P.dashCd = 1.6 * (P.dashCdMult || 1); P.invuln = Math.max(P.invuln, 0.3 * (P.dashLen || 1));
+  P.dashDx = dx; P.dashDz = dz; P.dashT = 0.22 * (P.dashLen || 1); P.dashCd = 1.6 * (P.dashCdMult || 1); P.invuln = Math.max(P.invuln, 0.4 * (P.dashLen || 1));
   AUDIO.sfx('dash');
   burstParticles(P.x, 0.3, P.z, 10, [0.6, 0.95, 0.9], 3, 0.35, 0.35, -2);
 }
@@ -1153,7 +1223,7 @@ function tryNova() {
   spawnRing(P.x, P.z, R, 0xffb060, 0.6, 0.08);
   spawnRing(P.x, P.z, R * 0.7, 0xfff0c0, 0.4, 0.2);
   burstParticles(P.x, 0.5, P.z, 90, [1.0, 0.7, 0.3], 9, 0.5, 0.8, -3);
-  novaLight.position.set(P.x, 2, P.z); novaLight.intensity = 40;
+  novaLight.position.set(P.x, 2, P.z); novaLight.intensity = 40; S.novaFlash = 0.35;
   if (hitCount >= 3) S.hitStop = 0.08;
   camShake.amp = Math.max(camShake.amp, 0.5); camShake.t = 0.4;
   AUDIO.sfx('nova');
@@ -1330,6 +1400,7 @@ function hurtPlayer(raw, src = 'other') {
   if (P.wards && P.wards.stonewatch && src === 'spit') scaled *= 0.7;
   if (P.eliteRes && (src === 'brute' || src.startsWith('boss'))) scaled *= 1 - P.eliteRes;
   const dmg = Math.max(1, Math.round(scaled * (1 - armour())));
+  S.lastHits.push({ src, dmg, t: S.t }); if (S.lastHits.length > 12) S.lastHits.shift();
   S.dmgLog[src] = (S.dmgLog[src] || 0) + dmg;
   P.hp -= dmg; P.invuln = 0.6 + (P.invBonus || 0); P.hitFlash = 0.2; if (!P.animOnce) P.animOnce = 'hurt';
   if (P.shell) { const sd = 10 * P.shell * dmgMult(); for (const e of S.enemies) { if (!e.dying && (e.x - P.x) ** 2 + (e.z - P.z) ** 2 < 9) { hurtEnemy(e, sd, false, true); const d = Math.hypot(e.x - P.x, e.z - P.z) || 0.5; e.kx += (e.x - P.x) / d * 4 / e.t.mass; e.kz += (e.z - P.z) / d * 4 / e.t.mass; } } spawnRing(P.x, P.z, 3, 0xff8a4a, 0.35, 0.15); }
@@ -1406,7 +1477,7 @@ function pickTalent(i) {
 // forge modal
 // =====================================================================
 function openForge() {
-  S.modal = 'forge'; S.paused = true;
+  S.modal = 'forge'; S.paused = true; S.forgeOpened = true;
   renderForge();
   $('#forge').classList.add('show');
   AUDIO.sfx('ui');
@@ -1527,8 +1598,9 @@ function updateEnemies(dt) {
     if (e.t.ranged) {
       if (d < 7) { mx = -nx; mz = -nz; sp *= 0.8; } else if (d < 10) { mx = nz; mz = -nx; sp *= 0.5; }
       e.shootCd -= dt;
-      if (e.shootCd <= 0 && d < 12) { e.shootCd = 3.0 + Math.random() * 1.2; const v = 8; S.eprojectiles.push({ x: e.x + nx * 0.6, z: e.z + nz * 0.6, vx: nx * v, vz: nz * v, life: 1.9, dmg: e.t.dmg }); AUDIO.sfx('spit', 0.15); }
+      if (e.shootCd <= 0 && d < 12) { e.shootCd = 3.0 + Math.random() * 1.2; const v = 9; S.eprojectiles.push({ x: e.x + nx * 0.6, z: e.z + nz * 0.6, vx: nx * v, vz: nz * v, life: 1.9, dmg: e.t.dmg }); AUDIO.sfx('spit', 0.15); }
     }
+    if (e.type === 'brute' && d < 9) { const st = Math.sin(e.bob * 0.6); if (st > 0.98 && !e.stomped) { e.stomped = true; camShake.amp = Math.max(camShake.amp, 0.12); camShake.t = 0.12; burstParticles(e.x, 0.1, e.z, 6, [0.5, 0.45, 0.4], 2, 0.3, 0.4); } else if (st < 0.9) e.stomped = false; }
     if (e.t.lunge) {
       e.lungeCd -= dt;
       if (e.lungeT > 0) { e.lungeT -= dt; sp *= 2.6; }
@@ -1536,6 +1608,8 @@ function updateEnemies(dt) {
       else if (e.lungeCd <= 0 && d < 6 && d > 2) { e.lungeCd = 3.2; e.lungeWarn = 0.3; }
     }
     if (e.stun > 0) sp *= 0.1;
+    if (e.windup > 0) sp *= 0.2;
+    if (e.lungeWarn > 0 && !e.t.lunge) e.lungeWarn -= dt;
     // separation
     enemyGrid.query(e.x, e.z, 2.5, _near);
     let sx = 0, sz = 0;
@@ -1545,7 +1619,11 @@ function updateEnemies(dt) {
     collideStatic(e, world.obstacles, e.r * 0.8);
     e.face = Math.atan2(mx, mz);
     // contact damage
-    if (d < e.r + P.r + 0.15 && e.atkCd <= 0 && e.stun <= 0) { e.atkCd = 1.0; hurtPlayer(e.t.dmg * (S.endless ? 1.25 : 1), e.type); }
+    if (e.type === 'brute') {
+      if (e.windup > 0) { e.windup -= dt; if (e.windup <= 0) { if (d < e.r + P.r + 0.9) hurtPlayer(e.t.dmg * (S.endless ? 1.25 : 1), e.type); e.atkCd = 1.4; } }
+      else if (d < e.r + P.r + 0.3 && e.atkCd <= 0 && e.stun <= 0) { e.windup = 0.35; e.lungeWarn = 0.35; }
+    }
+    else if (d < e.r + P.r + 0.15 && e.atkCd <= 0 && e.stun <= 0) { e.atkCd = 1.0; hurtPlayer(e.t.dmg * (S.endless ? 1.25 : 1), e.type); }
     // burning ground
     if (S.burns.length) for (const b of S.burns) { if ((e.x - b.x) ** 2 + (e.z - b.z) ** 2 < 1.2) { e.burnT = (e.burnT || 0) + dt; if (e.burnT > 0.25) { e.burnT = 0; hurtEnemy(e, 5 * dmgMult() * (P.burnMult || 1), false, true); } } }
   }
@@ -1592,7 +1670,7 @@ function updatePickups(dt) {
     if (d < pr || p.magnet) { p.magnet = true; const sp = 14 + (pr - d) * 2; p.x += dx / d * sp * dt; p.z += dz / d * sp * dt; }
     if (d < 0.7) {
       S.pickups.splice(i, 1);
-      if (p.kind === 'ember') { gainXp(p.value); AUDIO.sfx('ember', 0.04); spawnParticle(p.x, 0.6, p.z, 0, 2, 0, 0.5, 0.95, 0.85, 0.5, 0.3, 0); }
+      if (p.kind === 'ember') { gainXp(p.value); P.xpTotal = (P.xpTotal || 0) + p.value; AUDIO.sfx('ember', 0.04); spawnParticle(p.x, 0.6, p.z, 0, 2, 0, 0.5, 0.95, 0.85, 0.5, 0.3, 0); }
       else if (p.kind === 'shard') { P.shards += p.value; AUDIO.sfx('shard', 0.05); spawnParticle(p.x, 0.6, p.z, 0, 2, 0, 1, 0.7, 0.3, 0.6, 0.35, 0); }
       else { const heal = P.leech ? Math.round(p.value / 2) : p.value; P.hp = Math.min(P.maxHp, P.hp + heal); showNumber(P.x, 1.6, P.z, '+' + heal, 'heal'); AUDIO.sfx('heart'); burstParticles(P.x, 0.8, P.z, 12, [0.6, 1, 0.75], 2, 0.35, 0.5, -1); }
     }
@@ -1878,6 +1956,7 @@ function updatePlayer(dt) {
     burstParticles(P.x, 0.4, P.z, 2, [0.55, 0.95, 0.85], 1.5, 0.3, 0.3, -1);
   }
   P.x += dx * sp * dt; P.z += dz * sp * dt;
+  if (S.guide) S.guideMoved = (S.guideMoved || 0) + Math.hypot(dx, dz) * sp * dt;
   P.moving = lerp(P.moving, mv.len > 0 || P.dashT > 0 ? 1 : 0, 1 - Math.pow(0.001, dt));
   collideStatic(P, world.obstacles, P.r);
   // facing: toward aim when idle / manual, toward movement when auto & moving and no target
@@ -1912,7 +1991,7 @@ function updatePlayer(dt) {
   lan.rotation.x = Math.sin(P.bob * 0.7) * 0.25 * (0.3 + P.moving);
   playerRig.traverse((o) => { if (o.isMesh && o.material.emissive) o.material.emissive.setRGB(P.hitFlash * 3, P.hitFlash * 1.2, P.hitFlash * 1.2); });
   playerRig.visible = !(P.invuln > 0 && Math.floor(S.wall * 20) % 2 === 0 && P.dashT <= 0);
-  lampLight.position.set(P.x - Math.cos(P.facing) * 0.5, 1.0, P.z + Math.sin(P.facing) * 0.5);
+  lan.getWorldPosition(_lampV); lampLight.position.lerp(_lampV, 1 - Math.pow(0.001, dt * 6)); lampLight.position.y = Math.max(0.6, lampLight.position.y);
   FX.playerRing.position.set(P.x, 0.03, P.z);
   FX.playerRing.material.opacity = 0.35 + 0.25 * Math.sin(S.wall * 4);
   // forge hint
@@ -1925,6 +2004,7 @@ function updatePlayer(dt) {
 // =====================================================================
 const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s3 = new THREE.Vector3(), _p3 = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0), _col = new THREE.Color();
 const _qx = new THREE.Quaternion(), _ax = new THREE.Vector3(1, 0, 0), _az = new THREE.Vector3(0, 0, 1), _gcol = new THREE.Color();
+const _qL = new THREE.Quaternion(), _mL = new THREE.Matrix4(), _mR = new THREE.Matrix4(), _zero = new THREE.Vector3(), _one = new THREE.Vector3(1, 1, 1);
 function renderEnemies() {
   for (const k in enemySets) enemySets[k].begin();
   for (const e of S.enemies) {
@@ -1934,6 +2014,8 @@ function renderEnemies() {
     let sy = 1, sxz = 1;
     if (e.dying) { const k = 1 - e.dying / 0.18; sy = 1 - k * 0.9; sxz = 1 + k * 0.8; hop = 0; }
     else if (e.lungeWarn > 0) { sy = 1.15; sxz = 0.85; }
+    else if (e.type === 'brute') { const st = Math.sin(e.bob * 0.6); sy = 1 + Math.max(0, st) * 0.09; sxz = 1 - Math.max(0, st) * 0.04; hop = Math.max(0, st) * 0.18; }
+    else if (e.type === 'spitter' && e.shootCd < 0.5 && e.shootCd > 0) { const k = 1 - e.shootCd / 0.5; sy = 1 - k * 0.18; sxz = 1 + k * 0.22; }
     _p3.set(e.x, hop, e.z);
     _q.setFromAxisAngle(_up, e.face);
     if (e.type === 'wisp') { _qx.setFromAxisAngle(_ax, 0.25); _q.multiply(_qx); _p3.y = 0.25 + Math.sin(e.bob * 1.3) * 0.15; }
@@ -1941,7 +2023,17 @@ function renderEnemies() {
     _s3.set(sc * (1 - hop * 0.5) * sxz, sc * (1 + hop) * sy, sc * (1 - hop * 0.5) * sxz);
     _m4.compose(_p3, _q, _s3);
     _col.setRGB(1 + e.flash * 4, 1 + e.flash * 3, 1 + e.flash * 3);
-    const eye = e.lungeWarn > 0 ? 2.5 : (e.dying ? 0.2 : 1);
+    if (e.type === 'crawler') {
+      // legs scuttle: left and right groups swing opposite ways around the body axis, faster while lunging
+      const rate = e.lungeT > 0 ? 3.2 : 1.0, amp = e.stun > 0 ? 0.05 : 0.32;
+      const a = Math.sin(e.bob * 2.2 * rate) * amp;
+      _qL.setFromAxisAngle(_up, a); _mL.compose(_zero, _qL, _one); _mL.premultiply(_m4);
+      _qL.setFromAxisAngle(_up, -a); _mR.compose(_zero, _qL, _one); _mR.premultiply(_m4);
+      set.push(_m4, _col, _gcol, _mL, _mR);
+      continue;
+    }
+    let eye = e.lungeWarn > 0 ? 2.5 : (e.dying ? 0.2 : 1);
+    if (S.nightK > 0.2) { const dl = Math.hypot(e.x - P.x, e.z - P.z); if (dl < 7) eye *= 1 + S.nightK * 0.9 * (1 - dl / 7); }
     _gcol.setRGB(eye, eye, eye);
     set.push(_m4, _col, _gcol);
   }
@@ -1952,7 +2044,7 @@ function renderPickups() {
   for (const p of S.pickups) {
     _p3.set(p.x, p.y + Math.sin(p.spin) * 0.08 + 0.05, p.z);
     _q.setFromAxisAngle(_up, p.spin);
-    const sc = p.kind === 'ember' ? 0.75 : 0.9;
+    const sc = (p.kind === 'ember' ? 0.75 : 0.9) * (S.cues && p.kind === 'heart' ? 1.25 + Math.sin(p.spin * 2) * 0.15 : 1);
     _s3.setScalar(sc); _m4.compose(_p3, _q, _s3);
     pickupSets[p.kind].push(_m4);
   }
@@ -2075,6 +2167,9 @@ function tick(dt) {
     updatePickups(dt);
     updateBurns(dt);
     updateShrines(dt);
+    updateGuide(dt);
+    // death review data: hp at 10 Hz for the last 12 s
+    S.hpAcc = (S.hpAcc || 0) + dt; if (S.hpAcc >= 0.1) { S.hpAcc = 0; S.hpHist.push([S.t, P.hp]); if (S.hpHist.length > 120) S.hpHist.shift(); }
     if (!S.endless && S.t >= RUN_LENGTH && S.phase === 'run') endRun(true);
     AUDIO.setTension(S.boss ? 1 : (P.hp / P.maxHp < 0.35 ? 0.7 : (threat() >= 5 ? 0.5 : 0)));
   } else if (S.phase === 'dead' && ANIM.p) {
@@ -2201,7 +2296,7 @@ function autopilot(dt) {
 // =====================================================================
 window.__emberlight = {
   S, P: () => P, W, world: () => world, startRun, endRun, spawnBoss, spawnEnemy, spawnAround, setWeather: (tod, wx) => { W.tod = tod; W.wx = wx; W.auto = false; refreshWeatherButtons(); },
-  cheat: (o) => Object.assign(P, o), META, recordRun, SET, applyLang, applyQuality, gainXp, AUDIO, camDist: (v) => { camDist = v; }, PAD, pollGamepad, lightShrine, nearShrine, shrines: () => S.shrines, DIFFS, rollTalents, TALENTS, WEAPONS, spawnMini, MINIS, minis: () => S.minis, hurtMini, killMini, ANIM, clips: () => kit.clips.map((c) => c.name + ':' + c.duration.toFixed(2)), post: () => ({ ao: gtaoPass && gtaoPass.enabled, bloom: bloomPass && bloomPass.enabled, passes: composer && composer.passes.length }),
+  cheat: (o) => Object.assign(P, o), META, recordRun, SET, applyLang, applyQuality, applyCues, gainXp, AUDIO, camDist: (v) => { camDist = v; }, PAD, pollGamepad, lightShrine, nearShrine, shrines: () => S.shrines, DIFFS, rollTalents, TALENTS, WEAPONS, spawnMini, MINIS, minis: () => S.minis, hurtMini, killMini, GUIDE, ANIM, clips: () => kit.clips.map((c) => c.name + ':' + c.duration.toFixed(2)), post: () => ({ ao: gtaoPass && gtaoPass.enabled, bloom: bloomPass && bloomPass.enabled, passes: composer && composer.passes.length }),
   project: (x, y, z) => { const v = new THREE.Vector3(x, y, z).project(camera); return { sx: (v.x * 0.5 + 0.5) * window.innerWidth, sy: (-v.y * 0.5 + 0.5) * window.innerHeight }; },
   slashes: () => S.slashes.map((m) => ({ ry: m.rotation.y, arc: m.userData.arc })), giveShards: (n) => { P.shards += n; }, teleport: (x, z) => { P.x = x; P.z = z; },
   capture: async (url) => {
